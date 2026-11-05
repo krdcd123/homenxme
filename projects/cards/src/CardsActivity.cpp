@@ -62,6 +62,8 @@ constexpr int kDockCount = 6; // News, eShop, Album, Controllers, Settings, Powe
 const nxui::Rect kDock{340.f, 586.f, 600.f, 84.f};
 inline float dockX(int i) { return kDock.x + 54.f + 98.f * static_cast<float>(i); }
 inline float dockY() { return kDock.y + kDock.height * 0.5f; }
+const nxui::Rect kStockAvatar{48.f, 28.f, 52.f, 52.f};
+constexpr std::uint64_t kAllSoftwareId = 0xFE00AAAAAAAAAAAAULL;
 constexpr float kPanelRadius = 35.f;
 // The top bar: menu, Discord and sort on the left; the pill (you,
 // the time, battery, free space, Nextendo) ends at kPillRight; then the bell,
@@ -1536,6 +1538,7 @@ int CardsActivity::firstShownPage() const {
 }
 
 void CardsActivity::switchPage(int dir) {
+    if (m_stock) return; // (the stock look has one row)
     int pos = pagePos(m_page);
     for (int i = 0; i < pageCount(); ++i) { // the next page shown: hidden ones are skipped
         pos = (pos + (dir > 0 ? 1 : -1) + pageCount()) % pageCount();
@@ -2311,6 +2314,13 @@ void CardsActivity::openDiscord() {
 
 void CardsActivity::openNintendo(const Game& g) {
     const std::string& a = g.action;
+    if (a == "allsoftware") { // the stock look's last card: everything installed
+        m_stockAll = true;
+        m_stockSel = 0;
+        rebuildStockRow();
+        m_audio.play("navigation");
+        return;
+    }
     if (a == "get") { // a Media app that isn't on the SD card yet
         getMedia(g);
         return;
@@ -3125,7 +3135,24 @@ void CardsActivity::drawLock(nxui::Renderer& r) {
     const float rise = 18.f * (1.f - in);
     textMid(r, m_fLock, m_clock, 640.f - measured(m_fLock, m_clock).x * 0.5f, 268.f + rise + lift, kWhite.withAlpha(a));
     textMid(r, m_fLockDate, m_date, 640.f - measured(m_fLockDate, m_date).x * 0.5f, 350.f + rise + lift, kMuted.withAlpha(a));
-    if (m_lockGameId && m_settings.lockGameBanner) {
+    if (m_stock && m_lockGameId && m_settings.lockGameBanner) {
+        // The stock look: a small round icon of the game under the date, with a ring and its name.
+        const Game* lg = gameById(m_lockGameId);
+        const float d = 64.f, cy = 408.f + lift;
+        const nxui::Rect ring{640.f - d * 0.5f, cy - d * 0.5f, d, d};
+        frost(r, {ring.x - 6.f, ring.y - 6.f, d + 12.f, d + 12.f}, d * 0.5f + 6.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.5f * a));
+        if (const nxui::Texture* ico = lg ? stockIcon(*lg) : nullptr) r.drawTextureRounded(ico, ring, d * 0.5f, kWhite.withAlpha(a));
+        else r.drawCircle({640.f, cy}, d * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.25f * a), 32);
+        r.drawRoundedRectOutline({ring.x - 6.f, ring.y - 6.f, d + 12.f, d + 12.f}, nxui::Color(1.f, 1.f, 1.f, 0.35f * a), d * 0.5f + 6.f, 1.5f);
+        bool pwUi = false;
+#ifdef SWITCHU_MENU
+        pwUi = m_pwSet || m_pwSetup;
+#endif
+        if (!pwUi) {
+            const std::string nm = fit(m_fBody, m_lockGameName, 360.f, 0.85f);
+            textMid(r, m_fBody, nm, 640.f - measured(m_fBody, nm).x * 0.425f, cy + 56.f, kMuted.withAlpha(a), 0.85f);
+        }
+    } else if (m_lockGameId && m_settings.lockGameBanner) {
         const nxui::Rect banner{48.f, 122.f + lift, 420.f, 110.f};
         const auto it = m_art.find(m_lockGameId);
         if (it != m_art.end() && it->second.bg && it->second.bg->valid())
@@ -5191,6 +5218,7 @@ void CardsActivity::openUsers() {
 }
 
 void CardsActivity::openNotifications() {
+    m_statsMode = false;
     m_notifRows.clear();
     for (const auto& it : notifications::recent(6))
         m_notifRows.push_back({(it.kind.rfind("discord", 0) == 0 ? "Discord - " : "") + plain(it.title), plain(it.text)});
@@ -6986,6 +7014,11 @@ bool CardsActivity::handleTouch() {
         return true;
     }
     if (m_stock) { // the dock (the top bar and the panel aren't there)
+        if (kStockAvatar.contains(x, y)) {
+            m_zone = Zone::Top;
+            openMostPlayed();
+            return true;
+        }
         for (int d = 0; d < kDockCount; ++d)
             if (inCircle(dockX(d), dockY(), 46.f)) {
                 m_zone = Zone::Bottom;
@@ -7087,6 +7120,14 @@ void CardsActivity::perfMark(const char* step) {
 }
 
 void CardsActivity::onUpdate(float dt) {
+    if (m_stock) {
+        m_stockLoads = 0;
+        if (m_page != kGames) goToPage(kGames, 0); // one row for everything
+        if ((m_stockCheck -= dt) <= 0.f) {
+            m_stockCheck = 1.f;
+            rebuildStockRow();
+        }
+    }
     // Either stick moves through the games and every CardsNX menu (HomeNX's screens
     // in CardsNX already read their buttons before this).
     app().input().mergeRightStick();
@@ -7794,7 +7835,7 @@ void CardsActivity::onUpdate(float dt) {
             m_notifOpen = false;
             m_audio.play("hide_modal");
         }
-        if (in.isDown(B::X)) {
+        if (in.isDown(B::X) && !m_statsMode) {
             notifications::clear();
             m_notifRows.clear();
             m_audio.play("toggle_off");
@@ -7894,7 +7935,7 @@ void CardsActivity::onUpdate(float dt) {
             }
         }
     }
-    if (upDown && m_zone != Zone::Top && !(m_stock && m_zone == Zone::Cards)) {
+    if (upDown && m_zone != Zone::Top) {
         m_zone = m_zone == Zone::Bottom ? Zone::Cards : Zone::Top;
         m_audio.play("navigation");
     }
@@ -7907,14 +7948,20 @@ void CardsActivity::onUpdate(float dt) {
             press(1, sel());
             play();
         } else if (m_zone == Zone::Top) {
-            activateTop(m_topSel);
+            if (m_stock) openMostPlayed();
+            else activateTop(m_topSel);
         } else if (m_stock) {
             activateDock(m_dockSel);
         } else {
             activateBottom(m_bottomSel);
         }
     }
-    if (bDown && m_zone != Zone::Cards) m_zone = Zone::Cards;
+    if (bDown && m_stock && m_stockAll && m_zone == Zone::Cards) {
+        m_stockAll = false;
+        m_stockSel = 0;
+        rebuildStockRow();
+        m_audio.play("hide_modal");
+    } else if (bDown && m_zone != Zone::Cards) m_zone = Zone::Cards;
     if (in.isDown(B::Plus)) openOptions();
     if (in.isDown(B::X)) askClose();
     if (in.isDown(B::Minus)) openNotifications();
@@ -8162,8 +8209,8 @@ bool CardsActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scre
         auto tex = std::make_unique<nxui::Texture>();
         if (tex->loadFromFile(app().gpu(), app().renderer(), m_animPaths[m_animFrames.size()], 960)) {
             m_animFrames.push_back(std::move(tex));
-        } else { // an unreadable file: dropped from the list
-            m_animPaths.erase(m_animPaths.begin() + static_cast<std::ptrdiff_t>(m_animFrames.size()));
+        } else { // unreadable, or no memory left for more: the loop is the frames that did load
+            m_animPaths.resize(m_animFrames.size());
         }
     }
     if (m_animFrames.empty()) return false;
@@ -8173,6 +8220,134 @@ bool CardsActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scre
     return true;
 }
 
+// The stock look's one row: games and apps together, the most recently played first (the top 10),
+// then an "All Software" card that opens the whole list (B comes back).
+void CardsActivity::rebuildStockRow() {
+    std::vector<Game> all;
+    for (int p : {static_cast<int>(kGames), static_cast<int>(kHomebrew), static_cast<int>(kMedia)})
+        for (const Game& g : m_pages[p])
+            if (g.action.empty()) all.push_back(g);
+    std::stable_sort(all.begin(), all.end(), [](const Game& a, const Game& b) {
+        if (a.lastPlayed != b.lastPlayed) return a.lastPlayed > b.lastPlayed;
+        return a.order < b.order;
+    });
+    if (!m_stockAll) {
+        if (all.size() > 10) all.resize(10);
+        Game more;
+        more.id = kAllSoftwareId;
+        more.action = "allsoftware";
+        more.name = "All Software";
+        more.homebrew = true;
+        all.push_back(std::move(more));
+    }
+    bool same = all.size() == m_stockRow.size();
+    for (size_t i = 0; same && i < all.size(); ++i) same = all[i].id == m_stockRow[i].id;
+    if (same) { // (play times and names still refresh)
+        for (size_t i = 0; i < all.size(); ++i) m_stockRow[i] = all[i];
+        return;
+    }
+    const std::uint64_t keep = !m_stockRow.empty() && m_stockSel >= 0 && m_stockSel < static_cast<int>(m_stockRow.size())
+                             ? m_stockRow[(size_t)m_stockSel].id : 0;
+    m_stockRow = std::move(all);
+    m_stockSel = 0;
+    for (size_t i = 0; keep && i < m_stockRow.size(); ++i)
+        if (m_stockRow[i].id == keep) m_stockSel = static_cast<int>(i);
+    m_scroll = static_cast<float>(m_stockSel);
+    wantArt();
+}
+
+const Game* CardsActivity::gameById(std::uint64_t id) const {
+    for (const auto& page : m_pages)
+        for (const Game& g : page)
+            if (g.id == id) return &g;
+    return nullptr;
+}
+
+// A game's own icon (the one in the game, from the console's cache): read once, kept, so it never changes
+// to anything else. One is loaded per frame; until then the card shows its name.
+const nxui::Texture* CardsActivity::stockIcon(const Game& g) {
+    if (!g.action.empty()) return nullptr;
+    auto it = m_stockIcons.find(g.id);
+    if (it != m_stockIcons.end()) return it->second && it->second->valid() ? it->second.get() : nullptr;
+    const auto retry = m_stockIconRetry.find(g.id);
+    if (retry != m_stockIconRetry.end() && m_time < retry->second) return nullptr;
+    if (m_stockLoads >= 1) return nullptr;
+    ++m_stockLoads;
+    const std::vector<std::uint8_t> data = gameIcon(g);
+    int w = 0, h = 0;
+    std::uint8_t* px = data.empty() ? nullptr : decodePicture(data.data(), static_cast<int>(data.size()), w, h);
+    if (!px) { // not in the cache yet: asked again in a few seconds
+        m_stockIconRetry[g.id] = m_time + 4.f;
+        return nullptr;
+    }
+    std::vector<std::uint8_t> rgba(px, px + static_cast<std::size_t>(w) * h * 4);
+    stbi_image_free(px);
+    auto tex = std::make_unique<nxui::Texture>();
+    nxui::GpuDevice::EssentialScope essential; // (small, and always wanted)
+    if (!tex->loadFromPixels(app().gpu(), app().renderer(), rgba.data(), w, h)) {
+        m_stockIconRetry[g.id] = m_time + 4.f;
+        return nullptr;
+    }
+    const nxui::Texture* out = tex.get();
+    m_stockIcons[g.id] = std::move(tex);
+    return out;
+}
+
+// The profile: your most played games, in the same frosted card the notifications use.
+void CardsActivity::openMostPlayed() {
+    std::vector<Game> played;
+    for (int p : {static_cast<int>(kGames), static_cast<int>(kHomebrew), static_cast<int>(kMedia)})
+        for (const Game& g : m_pages[p])
+            if (g.action.empty() && g.playSeconds > 0) played.push_back(g);
+    std::sort(played.begin(), played.end(), [](const Game& a, const Game& b) { return a.playSeconds > b.playSeconds; });
+    if (played.size() > 7) played.resize(7);
+    m_statsGames = played;
+    m_notifRows.clear();
+    for (const Game& g : played) m_notifRows.push_back({g.name, playTime(g.playSeconds) + "   " + lastPlayed(g.lastPlayed)});
+    m_statsMode = true;
+    m_notifOpen = true;
+    m_menuIn = m_settings.motion ? 0.f : 1.f;
+    m_audio.play("show_modal");
+}
+
+// Sphaira as an application (in a borrowed game, with all the memory), not as an applet.
+void CardsActivity::openSphaira() {
+    std::string path = findNro("sphaira");
+    std::error_code ec;
+    if (path.empty() && std::filesystem::exists("sdmc:/switch/sphaira/sphaira.nro", ec)) path = "sdmc:/switch/sphaira/sphaira.nro";
+    if (path.empty()) {
+        say("Sphaira isn't on the SD card (switch/sphaira/sphaira.nro).");
+        return;
+    }
+#ifdef SWITCHU_MENU
+    if (const std::uint64_t open = runningId()) {
+        if (open == nroId(path)) {
+            resumeOpen(-1);
+            return;
+        }
+        askCloseFirst(open, "Sphaira", nroId(path));
+        return;
+    }
+    const std::uint64_t host = hostTitleId();
+    if (!host) {
+        say("Sphaira runs as an application, in an installed game it borrows: install one first.");
+        return;
+    }
+    m_settings.hbPath = path;
+    m_settings.hbHost = idText(host);
+    leave(-1, 0.85f, [this, path, host]() {
+        m_discord.beginShutdown();
+        if (!m_launcher.launchNro(path, host, launchUid(), /*applicationOnly=*/true)) {
+            comeBack();
+            const std::string why = AppletLauncher::loaderError();
+            say(why.empty() ? std::string("Sphaira didn't start.") : why);
+        }
+    });
+#else
+    openNro(path);
+#endif
+}
+
 // One entry of the row: a rounded square icon (the game's own icon, else its cover cropped), the stock
 // selection frame round the chosen one.
 void CardsActivity::drawStockCard(nxui::Renderer& r, const nxui::Rect& card, const Game& g, float t, float alpha,
@@ -8180,21 +8355,20 @@ void CardsActivity::drawStockCard(nxui::Renderer& r, const nxui::Rect& card, con
     const float rad = card.width * 0.2f;
     r.drawRoundedRect({card.x - 2.f, card.y + 6.f + 6.f * t, card.width + 4.f, card.height + 4.f},
                       nxui::Color(0.f, 0.f, 0.f, (0.20f + 0.16f * t) * alpha), rad + 2.f);
-    auto it = m_art.find(g.id);
-    const nxui::Texture* icon = it != m_art.end() && it->second.icon && it->second.icon->valid()
-                                && it->second.iconKind != ArtKind::Title ? it->second.icon.get() : nullptr;
-    const nxui::Texture* cover = it != m_art.end() && it->second.card && it->second.card->valid() ? it->second.card.get() : nullptr;
-    const auto th = m_thumbs.find(g.id);
-    const nxui::Texture* thumb = th != m_thumbs.end() && th->second.tex ? th->second.tex.get() : nullptr;
     const nxui::Color tint = kWhite.withAlpha(alpha);
-    if (icon) {
-        r.drawTextureRounded(icon, card, rad, tint);
-    } else if (cover && !g.action.empty()) { // HomeNX's own system pictures, as they're drawn
-        r.drawTextureRounded(cover, card, rad, tint);
-    } else if (cover) {
-        drawCover(r, cover, card, rad, tint, it->second.kind == ArtKind::Box ? 0.125f : 0.f, 0.f);
-    } else if (thumb) {
-        drawCover(r, thumb, card, rad, tint, th->second.kind == ArtKind::Box ? 0.125f : 0.f, 0.f);
+    if (g.action == "allsoftware") { // frosted tile with a grid of squares
+        frost(r, card, rad, nxui::Color(0.12f, 0.14f, 0.20f, 0.60f * alpha));
+        r.drawRoundedRectOutline(card, nxui::Color(1.f, 1.f, 1.f, 0.25f * alpha), rad, 1.5f);
+        const float u = card.width * 0.14f, gap = card.width * 0.05f;
+        const float x0 = card.x + (card.width - 3.f * u - 2.f * gap) * 0.5f, y0 = card.y + card.height * 0.5f - 1.5f * u - gap - 14.f;
+        for (int i = 0; i < 9; ++i)
+            r.drawRoundedRect({x0 + static_cast<float>(i % 3) * (u + gap), y0 + static_cast<float>(i / 3) * (u + gap), u, u},
+                              kWhite.withAlpha(0.85f * alpha), u * 0.25f);
+        const std::string name = "All Software";
+        textMid(r, m_fLabel, name, card.x + (card.width - measured(m_fLabel, name).x * 0.8f) * 0.5f, card.y + card.height - 26.f,
+                kWhite.withAlpha(alpha), 0.8f);
+    } else if (const nxui::Texture* ico = stockIcon(g)) { // the game's own icon: nothing else is ever drawn here
+        r.drawTextureRounded(ico, card, rad, tint);
     } else {
         r.drawRoundedRect(card, nxui::Color(0.28f, 0.31f, 0.40f, 0.85f * alpha), rad);
         const std::string name = fit(m_fLabel, g.name, card.width - 24.f, 0.9f);
@@ -8220,6 +8394,9 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
     if (m_avatar && m_avatar->valid()) r.drawTextureRounded(m_avatar.get(), fr, face * 0.5f, kWhite.withAlpha(a));
     else r.drawCircle({fr.x + face * 0.5f, fr.y + face * 0.5f}, face * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.3f * a), 32);
     r.drawRoundedRectOutline(fr, kWhite.withAlpha(0.8f * a), face * 0.5f, 2.f);
+    if (m_zone == Zone::Top)
+        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a),
+                                 face * 0.5f + 5.f, 3.f);
     const float hy = fr.y + face * 0.5f;
     float x = 1236.f;
     x -= measured(m_fPill, m_battery).x;
@@ -8235,6 +8412,20 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         if (cardRect(sel(), card, t) && a >= 0.999f) {
             const std::string name = fit(m_fTitle, g->name, 640.f, 0.62f);
             textMid(r, m_fTitle, name, card.x, card.y - 34.f, nxui::Color(0.36f, 0.78f, 1.f, a), 0.62f);
+            if (m_zone == Zone::Cards && !m_moving) { // its play time, in a frosted box under it
+                std::string line;
+                if (g->action == "allsoftware") line = std::to_string(std::max<std::size_t>(1, m_stockAll ? m_stockRow.size() : [this] {
+                    std::size_t n = 0;
+                    for (int p : {static_cast<int>(kGames), static_cast<int>(kHomebrew), static_cast<int>(kMedia)}) n += m_pages[p].size();
+                    return n;
+                }())) + " titles";
+                else line = g->playSeconds ? playTime(g->playSeconds) + " played" : std::string("Not played yet");
+                const float lw = measured(m_fBody, line).x;
+                const nxui::Rect box{card.x + (card.width - (lw + 44.f)) * 0.5f, card.y + card.height + 18.f, lw + 44.f, 40.f};
+                frost(r, box, 20.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.55f * a));
+                r.drawRoundedRectOutline(box, nxui::Color(1.f, 1.f, 1.f, 0.22f * a), 20.f, 1.5f);
+                textMid(r, m_fBody, line, box.x + 22.f, box.y + 20.f, kWhite.withAlpha(a));
+            }
         }
     }
 
@@ -8259,9 +8450,10 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         const float w = 2.6f;
         switch (i) {
             case 0: icon(r, "news", cx, cy, 36.f * k, c); break;
-            case 1: // eShop: a bag
-                r.drawRoundedRectOutline({cx - 14.f * k, cy - 7.f * k, 28.f * k, 24.f * k}, c, 6.f, w);
-                r.drawRoundedRectOutline({cx - 8.f * k, cy - 17.f * k, 16.f * k, 18.f * k}, c, 8.f, w);
+            case 1: // Sphaira: a grid of apps
+                for (int q = 0; q < 4; ++q)
+                    r.drawRoundedRectOutline({cx - 15.f * k + static_cast<float>(q % 2) * 17.f * k,
+                                              cy - 15.f * k + static_cast<float>(q / 2) * 17.f * k, 13.f * k, 13.f * k}, c, 4.f, w);
                 break;
             case 2: // Album: a frame with a lens
                 r.drawRoundedRectOutline({cx - 18.f * k, cy - 13.f * k, 36.f * k, 26.f * k}, c, 7.f, w);
@@ -8273,13 +8465,25 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         }
     }
 
+    // What the chosen dock button opens, in a small frosted label above it
+    if (dock && a >= 0.999f) {
+        static const char* const kLabel[] = {"News", "Sphaira", "Album", "Controllers", "Settings", "Power"};
+        const std::string label = kLabel[std::clamp(m_dockSel, 0, kDockCount - 1)];
+        const float lw = measured(m_fBody, label).x;
+        const nxui::Rect lb{dockX(m_dockSel) - (lw + 36.f) * 0.5f, pill.y - 50.f, lw + 36.f, 36.f};
+        frost(r, lb, 18.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.6f));
+        r.drawRoundedRectOutline(lb, nxui::Color(1.f, 1.f, 1.f, 0.25f), 18.f, 1.5f);
+        textMid(r, m_fBody, label, lb.x + 18.f, lb.y + 18.f, kWhite);
+    }
+
     // The footer
-    drawHints(r, 1236.f, 696.f, {{"A", "OK"}, {"+", "Options"}, {"-", "Notices"}}, a);
+    if (m_stockAll) drawHints(r, 1236.f, 696.f, {{"A", "OK"}, {"B", "Back"}, {"+", "Options"}}, a);
+    else drawHints(r, 1236.f, 696.f, {{"A", "OK"}, {"+", "Options"}, {"-", "Notices"}}, a);
 }
 
 void CardsActivity::activateDock(int index) {
-    static const char* const kAction[] = {"news", "eshop", "album", "controllers", "settings"};
-    static const char* const kName[] = {"News", "eShop", "Album", "Controllers", "Settings"};
+    static const char* const kAction[] = {"news", "sphaira", "album", "controllers", "settings"};
+    static const char* const kName[] = {"News", "Sphaira", "Album", "Controllers", "Settings"};
     if (index < 0 || index >= kDockCount) return;
     if (index == kDockCount - 1) {
         openPower();
@@ -8291,6 +8495,10 @@ void CardsActivity::activateDock(int index) {
         return;
     }
 #endif
+    if (index == 1) {
+        openSphaira();
+        return;
+    }
     Game g;
     g.action = kAction[index];
     g.name = kName[index];
@@ -8634,7 +8842,7 @@ void CardsActivity::drawCardExtras(nxui::Renderer& r) {
         }
 
         if (isRunning(g.id)) { // open now: a pill at the bottom of its card
-            const std::string word = "Open now";
+            const std::string word = m_stock ? "Resume" : "Open now";
             const float w = 20.f + 10.f + measured(m_fBadge, word).x + 16.f;
             const nxui::Rect pill{card.x + (card.width - w) * 0.5f, card.y + card.height - 46.f, w, 32.f};
             frost(r, pill, 16.f, nxui::Color(0.05f, 0.07f, 0.09f, 0.55f * alpha));
@@ -9011,27 +9219,37 @@ void CardsActivity::drawPopup(nxui::Renderer& r) {
         // A card for each: a bell on an accent tile, who or what, then the words.
         const float rows = static_cast<float>(std::max<size_t>(1, m_notifRows.size()));
         nxui::Rect box{kGearX + 38.f - 460.f, 84.f - 12.f * (1.f - a), 460.f, 60.f + rows * 64.f + 40.f};
+        if (m_statsMode) box.x = 48.f; // the profile's card: under your picture, on the left
         r.drawRoundedRect({box.x - 4.f, box.y + 10.f, box.width + 8.f, box.height + 4.f}, nxui::Color(0.f, 0.f, 0.f, 0.28f * a),
                           28.f); // its shadow
         frost(r, box, 24.f, nxui::Color(0.10f, 0.11f, 0.15f, 0.82f * a));
         r.drawRoundedRectOutline(box, nxui::Color(1.f, 1.f, 1.f, 0.14f * a), 24.f, 1.5f);
         r.drawGradientRect({box.x + 2.f, box.y + 2.f, box.width - 4.f, 56.f}, nxui::Color(1.f, 1.f, 1.f, 0.06f * a),
                            nxui::Color(1.f, 1.f, 1.f, 0.f));
-        icon(r, "bell", box.x + 32.f, box.y + 30.f, 24.f, kWhite.withAlpha(a));
-        textMid(r, m_fLabel, "Notifications", box.x + 54.f, box.y + 30.f, kWhite.withAlpha(a));
+        if (m_statsMode) {
+            textMid(r, m_fLabel, "Most played", box.x + 24.f, box.y + 30.f, kWhite.withAlpha(a));
+        } else {
+            icon(r, "bell", box.x + 32.f, box.y + 30.f, 24.f, kWhite.withAlpha(a));
+            textMid(r, m_fLabel, "Notifications", box.x + 54.f, box.y + 30.f, kWhite.withAlpha(a));
+        }
         if (m_notifRows.empty())
-            textMid(r, m_fBody, "You're all caught up", box.x + 22.f, box.y + 82.f, kMuted.withAlpha(a));
+            textMid(r, m_fBody, m_statsMode ? "Nothing played yet" : "You're all caught up", box.x + 22.f, box.y + 82.f, kMuted.withAlpha(a));
         for (size_t i = 0; i < m_notifRows.size(); ++i) {
             const nxui::Rect card{box.x + 12.f, box.y + 58.f + static_cast<float>(i) * 64.f, box.width - 24.f, 58.f};
             r.drawRoundedRect(card, nxui::Color(1.f, 1.f, 1.f, 0.06f * a), 16.f);
             const nxui::Rect tile{card.x + 10.f, card.y + 12.f, 34.f, 34.f};
-            r.drawRoundedRect(tile, accent(0.85f * a), 10.f);
-            icon(r, "bell", tile.x + 17.f, tile.y + 17.f, 19.f, kWhite.withAlpha(a));
+            const nxui::Texture* gi = m_statsMode && i < m_statsGames.size() ? stockIcon(m_statsGames[i]) : nullptr;
+            if (gi) {
+                r.drawTextureRounded(gi, tile, 9.f, kWhite.withAlpha(a));
+            } else {
+                r.drawRoundedRect(tile, accent(0.85f * a), 10.f);
+                if (!m_statsMode) icon(r, "bell", tile.x + 17.f, tile.y + 17.f, 19.f, kWhite.withAlpha(a));
+            }
             const float tx = tile.x + tile.width + 12.f, room = card.x + card.width - 12.f - tx;
             r.drawText(fit(m_fPill, m_notifRows[i].first, room), {tx, card.y + 5.f}, &m_fPill, kWhite.withAlpha(a));
             r.drawText(fit(m_fBody, m_notifRows[i].second, room), {tx, card.y + 31.f}, &m_fBody, kMuted.withAlpha(a));
         }
-        if (m_notifRows.empty()) drawHints(r, box.x + box.width - 20.f, box.y + box.height - 22.f, {{"B", "Close"}}, a);
+        if (m_notifRows.empty() || m_statsMode) drawHints(r, box.x + box.width - 20.f, box.y + box.height - 22.f, {{"B", "Close"}}, a);
         else drawHints(r, box.x + box.width - 20.f, box.y + box.height - 22.f, {{"X", "Clear all"}, {"B", "Close"}}, a);
         return;
     }

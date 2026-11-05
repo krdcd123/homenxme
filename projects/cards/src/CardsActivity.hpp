@@ -176,8 +176,9 @@ private:
                            std::string detail = {});
     static MenuItem info(std::string label, std::function<std::string()> value);
 
-    std::vector<Game>& games() { return m_pages[m_page]; }
-    int& sel() { return m_sels[m_page]; }
+    // Stock look: Games page = one row of games and apps together (recent first), then "All Software".
+    std::vector<Game>& games() { return m_stock && m_page == kGames ? m_stockRow : m_pages[m_page]; }
+    int& sel() { return m_stock && m_page == kGames ? m_stockSel : m_sels[m_page]; }
     const Game* current();
 
     void worker(int index);
@@ -543,6 +544,20 @@ private:
     std::vector<std::string> m_animPaths;
     float m_animFps = 10.f;
     bool m_animTried = false;
+    std::vector<Game> m_stockRow;
+    int m_stockSel = 0;
+    bool m_stockAll = false;          // "All Software": everything, not just the recent ones
+    float m_stockCheck = 0.f;
+    std::map<std::uint64_t, std::unique_ptr<nxui::Texture>> m_stockIcons; // each game's own icon (never third-party art)
+    std::map<std::uint64_t, float> m_stockIconRetry;
+    int m_stockLoads = 0;
+    bool m_statsMode = false;         // the notifications card, showing the most played games
+    std::vector<Game> m_statsGames;
+    void rebuildStockRow();
+    const nxui::Texture* stockIcon(const Game& g);
+    const Game* gameById(std::uint64_t id) const;
+    void openMostPlayed();
+    void openSphaira();
     void loadAnimBackground();
     bool drawAnimBackground(nxui::Renderer& r, const nxui::Rect& screen);
     void drawStockCard(nxui::Renderer& r, const nxui::Rect& card, const Game& g, float t, float alpha, bool focusedRow);
