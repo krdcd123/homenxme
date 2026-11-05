@@ -39,6 +39,8 @@ struct Settings {
     int soundVolume = 80;     // 0..100
     bool players = true;      // Nextendo's green dots
     bool motion = true;       // animations (off: things move straight to place)
+    bool stockLook = false;   // the stock-Switch layout (also on when frontend.txt says cards-stock)
+    bool animBg = true;       // play sdmc:/config/CardsNX/animbg/ frames when they exist
     bool bgMotion = true;     // the background art drifts
     int startPage = 0;        // (old: the page order's first is where it opens now)
     std::vector<int> pageOrder = {0, 1, 2, 3}; // the pages in order: 0 games, 1 homebrew, 2 Nintendo, 3 media
@@ -114,6 +116,8 @@ struct Settings {
             players = j.value("players", players);
             motion = j.value("motion", motion);
             bgMotion = j.value("bgMotion", bgMotion);
+            stockLook = j.value("stockLook", stockLook);
+            animBg = j.value("animBg", animBg);
             startPage = j.value("startPage", startPage);
             pageOrder = j.value("pageOrder", pageOrder);
             customPages.clear();
@@ -180,7 +184,7 @@ struct Settings {
     void save() const {
         nlohmann::json j = {{"music", music}, {"musicVolume", musicVolume}, {"shuffle", shuffle}, {"repeat", repeat},
                             {"sounds", sounds}, {"soundVolume", soundVolume}, {"players", players},
-                            {"motion", motion}, {"bgMotion", bgMotion}, {"startPage", startPage}, {"pageOrder", pageOrder},
+                            {"motion", motion}, {"bgMotion", bgMotion}, {"stockLook", stockLook}, {"animBg", animBg}, {"startPage", startPage}, {"pageOrder", pageOrder},
                             {"sortOrder", sort}, {"haze", haze}, {"boxArt", boxArt}, {"accent", accent},
                             {"glass", glass}, {"launchStyle", launchStyle}, {"clock24", clock24}, {"showFree", showFree}, {"showTemp", showTemp}, {"titlePics", titlePics}, {"mediaIn", mediaIn}, {"mediaOut", mediaOut}, {"gamesIn", gamesIn}, {"gamesOut", gamesOut}, {"fullCards", fullCards}, {"shuffleWall", shuffleWall},
                             {"nroHash", nroHash}, {"titles", titles}, {"askUser", askUser}, {"panelApp", panelApp},

@@ -536,6 +536,18 @@ private:
     float m_scroll = 0.f;  // the row's position, easing to sel()
     float m_repeat = 0.f;  // held left / right
     Zone m_zone = Zone::Cards;
+    // Stock look ("cards-stock"): rounded square icons, a frosted pill dock, header and footer like the Switch's own HOME.
+    bool m_stock = false;
+    int m_dockSel = 0;
+    std::vector<std::unique_ptr<nxui::Texture>> m_animFrames; // sdmc:/config/CardsNX/animbg/*.jpg, played as the background
+    std::vector<std::string> m_animPaths;
+    float m_animFps = 10.f;
+    bool m_animTried = false;
+    void loadAnimBackground();
+    bool drawAnimBackground(nxui::Renderer& r, const nxui::Rect& screen);
+    void drawStockCard(nxui::Renderer& r, const nxui::Rect& card, const Game& g, float t, float alpha, bool focusedRow);
+    void drawStockChrome(nxui::Renderer& r, float a);
+    void activateDock(int index);
     int m_topSel = 0, m_bottomSel = 0;
 
     // Motion: everything eases on m_time.
