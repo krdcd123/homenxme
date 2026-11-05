@@ -63,6 +63,10 @@ const nxui::Rect kDock{340.f, 586.f, 600.f, 84.f};
 inline float dockX(int i) { return kDock.x + 54.f + 98.f * static_cast<float>(i); }
 inline float dockY() { return kDock.y + kDock.height * 0.5f; }
 const nxui::Rect kStockAvatar{48.f, 28.f, 52.f, 52.f};
+// All Software: a grid, three rows in view, scrolling by row.
+constexpr int kGridCols = 7;
+constexpr float kGridSize = 120.f, kGridPitchX = 164.f, kGridPitchY = 150.f, kGridX = 88.f, kGridY = 150.f;
+constexpr float kReturnSecs = 0.42f; // the game's picture shrinking into its card
 constexpr std::uint64_t kAllSoftwareId = 0xFE00AAAAAAAAAAAAULL;
 constexpr float kPanelRadius = 35.f;
 // The top bar: menu, Discord and sort on the left; the pill (you,
@@ -1247,6 +1251,7 @@ bool CardsActivity::reserveArtwork(std::uint64_t bytes) {
 }
 
 void CardsActivity::wantArt() {
+    if (m_stock) return; // (the stock look draws each game's own icon, nothing downloaded)
     auto& page = games();
     std::vector<Job> jobs;
     auto add = [&](int i, int what) {
@@ -2602,7 +2607,9 @@ void CardsActivity::pumpDaemon() {
                 m_asleep = true;
                 m_audio.pause();
                 if (m_settings.lockScreen) { // drawn into the last frames, so waking shows it at once
+                    m_inSleepLock = true;
                     lock();
+                    m_inSleepLock = false;
                     m_lockIn = 1.f;
                 }
                 app().setSleeping(true);
@@ -2618,7 +2625,9 @@ void CardsActivity::pumpDaemon() {
                     break;
                 }
                 if (m_settings.lockScreen && !m_locked) {
+                    m_inSleepLock = true;
                     lock(); // it pauses the music itself, unless the setting says otherwise
+                    m_inSleepLock = false;
                     break;
                 }
                 m_audio.resume();
@@ -2972,12 +2981,7 @@ void CardsActivity::chooseWallpaper(const std::string& path, bool lockScreen) {
 
 // The lock screen (Settings > Look): the time and date over the art, frosted.
 void CardsActivity::lock() {
-    if (!m_lockFonts) {
-        m_lockFonts = true;
-        const std::string fonts = std::string(kAssets) + "fonts/";
-        m_fLock.load(app().gpu(), app().renderer(), fonts + "Inter-600.ttf", 104);
-        m_fLockDate.load(app().gpu(), app().renderer(), fonts + "Inter-500.ttf", 28);
-    }
+    ensureLockFonts(); // (normally loaded already, while HOME was idle)
     closeEverything(); // (Discord's panel and the rest were drawn over the lock)
     if (!m_locked) switchu::lockpicture::next(armGetSystemTick());
     m_lockGameId = 0;
@@ -2999,6 +3003,24 @@ void CardsActivity::lock() {
             }
         }
     }
+#ifdef SWITCHU_MENU
+    if (running && !m_lockShot && !m_inSleepLock) { // the game's last frame stays behind the frosted glass
+        std::vector<std::uint8_t> px(1280u * 720u * 4u);
+        bool ok = false;
+        if (R_SUCCEEDED(appletGetLastApplicationCaptureImageEx(px.data(), px.size(), &ok)) && ok) {
+            for (size_t i = 3; i < px.size(); i += 4) px[i] = 0xFF; // games leave alpha undefined
+            auto tex = std::make_unique<nxui::Texture>();
+            if (tex->loadFromPixels(app().gpu(), app().renderer(), px.data(), 1280, 720)) m_lockShot = std::move(tex);
+        }
+    }
+#endif
+    if (m_lockGameId && !m_inSleepLock) { // its icon is read now, not while the screen draws
+        m_stockLoads = 0;
+        if (const Game* lg = gameById(m_lockGameId)) stockIcon(*lg);
+    }
+    m_lockShotBlur = false;
+    m_lockBlurOk = false;
+    m_blurAge = 1000; // a fresh blurred copy of HOME at once
     m_locked = true;
     m_lockIn = m_settings.motion ? 0.f : 1.f;
     m_unlockT = -1.f;
@@ -3043,6 +3065,10 @@ bool CardsActivity::updateLock(float dt) {
         if (m_unlockT >= 1.f) {
             m_locked = false;
             m_unlockT = -1.f;
+            if (m_lockShot) {
+                app().gpu().waitIdle(); // it may still be drawing
+                m_lockShot.reset();
+            }
         }
         return true;
     }
@@ -3125,7 +3151,8 @@ void CardsActivity::drawLock(nxui::Renderer& r) {
     const float out = m_unlockT < 0.f ? 0.f : easeInOut(std::min(1.f, m_unlockT));
     const float a = in * (1.f - out), lift = -110.f * out;
     const nxui::Rect screen{0.f, 0.f, 1280.f, 720.f};
-    if (m_lockTex && m_lockTex->valid()) { // its own picture, sharp; a little shade keeps the clock readable
+    if (m_lockShot && m_lockShot->valid()) r.drawTexture(m_lockShot.get(), screen, kWhite.withAlpha(a)); // the game behind
+    if (m_lockTex && m_lockTex->valid() && !m_lockShot) { // its own picture, sharp; a little shade keeps the clock readable
         drawCover(r, m_lockTex.get(), screen, 0.f, kWhite.withAlpha(a));
         r.drawGradientRect(screen, nxui::Color(0.f, 0.f, 0.f, 0.18f * a), nxui::Color(0.f, 0.f, 0.f, 0.45f * a));
     } else {
@@ -3141,7 +3168,7 @@ void CardsActivity::drawLock(nxui::Renderer& r) {
         const float d = 64.f, cy = 408.f + lift;
         const nxui::Rect ring{640.f - d * 0.5f, cy - d * 0.5f, d, d};
         frost(r, {ring.x - 6.f, ring.y - 6.f, d + 12.f, d + 12.f}, d * 0.5f + 6.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.5f * a));
-        if (const nxui::Texture* ico = lg ? stockIcon(*lg) : nullptr) r.drawTextureRounded(ico, ring, d * 0.5f, kWhite.withAlpha(a));
+        if (const nxui::Texture* ico = lg ? stockIconCached(lg->id) : nullptr) r.drawTextureRounded(ico, ring, d * 0.5f, kWhite.withAlpha(a));
         else r.drawCircle({640.f, cy}, d * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.25f * a), 32);
         r.drawRoundedRectOutline({ring.x - 6.f, ring.y - 6.f, d + 12.f, d + 12.f}, nxui::Color(1.f, 1.f, 1.f, 0.35f * a), d * 0.5f + 6.f, 1.5f);
         bool pwUi = false;
@@ -4835,12 +4862,12 @@ bool CardsActivity::presentInitialFrame(nxui::Renderer& ren) {
 
 void CardsActivity::drawReturn(nxui::Renderer& r) {
     if (!m_returnTex) return;
-    const float t = std::min(1.f, m_returnT / 0.32f), e = easeInOut(t);
+    const float t = std::min(1.f, m_returnT / kReturnSecs), e = easeInOut(t);
     nxui::Rect card{640.f - kCardW * 0.5f, kCardMidY - kCardH * 0.5f, kCardW, kCardH};
     float chosen = 0.f;
     if (!games().empty()) cardRect(sel(), card, chosen);
     const nxui::Rect at{card.x * e, card.y * e, 1280.f + (card.width - 1280.f) * e, 720.f + (card.height - 720.f) * e};
-    drawCover(r, m_returnTex.get(), at, kCardRadius * e, kWhite.withAlpha(1.f - easeIn(t)));
+    drawCover(r, m_returnTex.get(), at, (m_stock ? card.width * 0.2f : kCardRadius) * e, kWhite.withAlpha(1.f - easeIn(t)));
 }
 
 bool CardsActivity::spotifyOn() const {
@@ -6974,12 +7001,12 @@ bool CardsActivity::handleTouch() {
     }
 
     if (in.touchDown()) {
-        m_touchOnCards = y > 100.f && y < 490.f;
+        m_touchOnCards = y > 100.f && y < (m_stock && m_stockAll ? 580.f : 490.f);
         m_touchScroll = m_scroll;
         m_dragging = false;
     }
     // Dragging the row: it follows the finger, the card under the middle is chosen.
-    if (in.isTouching() && m_touchOnCards) {
+    if (in.isTouching() && m_touchOnCards && !(m_stock && m_stockAll)) {
         const float dx = x - in.touchStartX();
         if (!m_dragging && std::abs(dx) > 14.f) m_dragging = true;
         if (m_dragging && !games().empty()) {
@@ -7120,6 +7147,7 @@ void CardsActivity::perfMark(const char* step) {
 }
 
 void CardsActivity::onUpdate(float dt) {
+    if (!m_lockFonts && m_time > 4.f && !m_leaving && !m_locked) ensureLockFonts(); // (a hitch at idle, not when locking)
     if (m_stock) {
         m_stockLoads = 0;
         if (m_page != kGames) goToPage(kGames, 0); // one row for everything
@@ -7137,7 +7165,7 @@ void CardsActivity::onUpdate(float dt) {
                        // into its card while the cards rise in, as one movement.
         if (m_time > 0.25f) { // HOME is up: let go and play the return
             m_returnT += std::min(dt, 1.f / 30.f); // (a lagged frame doesn't skip the movement)
-            if (m_returnT > 0.32f) {
+            if (m_returnT > kReturnSecs) {
                 app().gpu().waitIdle(); // it may still be drawing
                 m_returnTex.reset();
             }
@@ -7314,7 +7342,7 @@ void CardsActivity::onUpdate(float dt) {
 #ifdef SWITCHU_MENU
     step(m_newsIn, 0.24f);
 #endif
-    const float target = static_cast<float>(sel());
+    const float target = scrollTarget();
     if (!m_dragging) {
         m_scroll = motion ? m_scroll + (target - m_scroll) * (1.f - std::exp(-dt * 13.f)) : target;
         if (std::abs(m_scroll - target) < 0.001f) m_scroll = target;
@@ -7935,11 +7963,24 @@ void CardsActivity::onUpdate(float dt) {
             }
         }
     }
-    if (upDown && m_zone != Zone::Top) {
+    bool gridHandled = false;
+    if (m_stock && m_stockAll && m_zone == Zone::Cards && !m_moving && (upDown || downDown)) {
+        const int n = static_cast<int>(games().size()), s = sel();
+        gridHandled = true;
+        if (upDown) {
+            if (s >= kGridCols) select(s - kGridCols);
+            else { m_zone = Zone::Top; m_audio.play("navigation"); }
+        } else {
+            if (s + kGridCols < n) select(s + kGridCols);
+            else if (n > 0 && s / kGridCols < (n - 1) / kGridCols) select(n - 1);
+            else { m_zone = Zone::Bottom; m_audio.play("navigation"); }
+        }
+    }
+    if (upDown && !gridHandled && m_zone != Zone::Top) {
         m_zone = m_zone == Zone::Bottom ? Zone::Cards : Zone::Top;
         m_audio.play("navigation");
     }
-    if (downDown && m_zone != Zone::Bottom) {
+    if (downDown && !gridHandled && m_zone != Zone::Bottom) {
         m_zone = m_zone == Zone::Top ? Zone::Cards : Zone::Bottom;
         m_audio.play("navigation");
     }
@@ -7991,6 +8032,31 @@ void CardsActivity::draw(nxui::Renderer& r) {
     m_drawMarkTick = armGetSystemTick();
     m_drawMarkMs = 0.f;
     m_drawMarkName = "";
+    // Locked and settled: nothing under the lock screen moves, so HOME isn't drawn at all (it was every frame):
+    // the game's last frame (blurred once), the lock picture, or the blurred copy of HOME already made.
+    if (m_locked && m_lockIn >= 1.f && m_unlockT < 0.f) {
+        const nxui::Rect screen{0.f, 0.f, 1280.f, 720.f};
+        if (m_lockShot && m_lockShot->valid()) {
+            r.drawTexture(m_lockShot.get(), screen, kWhite);
+            m_frosted = r.gpu().offscreenReady() && !m_gpuSlow;
+            if (m_frosted && !m_lockShotBlur) {
+                r.captureToOffscreen(false);
+                r.applyBlur(4.f, 3);
+                m_lockShotBlur = true;
+            }
+            drawLock(r);
+            return;
+        }
+        if (m_lockTex && m_lockTex->valid()) {
+            drawLock(r);
+            return;
+        }
+        if (m_lockBlurOk && r.gpu().offscreenReady() && !m_gpuSlow) {
+            m_frosted = true;
+            drawLock(r);
+            return;
+        }
+    }
     drawStep("draw: the background");
     drawBackground(r);
     drawStep("draw: the cards");
@@ -8008,12 +8074,26 @@ void CardsActivity::draw(nxui::Renderer& r) {
     // the fancy glass only comes back once HOME is running steady.
     m_frosted = r.gpu().offscreenReady() && !m_gpuSlow && m_time > 1.5f;
     if (m_frosted) {
-        const bool moving = std::abs(m_scroll - static_cast<float>(sel())) > 0.002f || m_dragging || m_pageIn < 1.f
+        const bool moving = std::abs(m_scroll - scrollTarget()) > 0.002f || m_dragging || m_pageIn < 1.f
                          || m_bgFade < 1.f || m_intro < 1.f || m_leaving || m_moving || focusRoot() != nullptr;
-        if (moving || ++m_blurAge >= (m_settings.bgMotion || (m_stock && !m_animFrames.empty()) ? 6 : 60)) {
+        // The stock look over its animated background has its glass baked (frostFast): the live blur is only
+        // made while something that uses it is on screen.
+        bool needBlur = true;
+        if (m_stock && !m_animBlur.empty()) {
+            needBlur = !m_menu.empty() || m_notifOpen || m_sheetOpen || m_moving || m_quickOpen || m_powerOpen || m_dotsOpen
+                    || m_optOpen || m_pickOpen || m_musicOpen || m_spQrOpen || m_messageFor > 0.f || m_locked || m_leaving
+                    || m_intro < 1.f || focusRoot() != nullptr;
+#ifdef SWITCHU_MENU
+            needBlur = needBlur || m_newsIn > 0.f;
+#endif
+        }
+        if (!needBlur) {
+            m_blurAge = 1000; // made at once when something needs it
+        } else if (moving || ++m_blurAge >= (m_settings.bgMotion || (m_stock && !m_animFrames.empty()) ? 6 : 60)) {
             r.captureToOffscreen(false);
             r.applyBlur(2.5f, 2);
             m_blurAge = 0;
+            m_lockBlurOk = true;
         }
     } else {
         m_blurAge = 1000; // made at once when it's back
@@ -8190,9 +8270,12 @@ void CardsActivity::loadAnimBackground() {
         if (!e.is_regular_file()) continue;
         std::string ext = e.path().extension().string();
         for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") files.push_back(e.path().string());
+        if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") continue;
+        if (e.path().filename().string().rfind("blur_", 0) == 0) m_animBlurPaths.push_back(e.path().string());
+        else files.push_back(e.path().string());
     }
     std::sort(files.begin(), files.end());
+    std::sort(m_animBlurPaths.begin(), m_animBlurPaths.end());
     if (files.size() > 48) files.resize(48);
     m_animPaths = std::move(files);
     std::string rate;
@@ -8215,7 +8298,13 @@ bool CardsActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scre
     }
     if (m_animFrames.empty()) return false;
     const bool ready = m_animFrames.size() == m_animPaths.size();
+    if (ready && m_animBlur.size() < m_animBlurPaths.size() && m_animBlur.size() < m_animFrames.size()) { // the small blurred ones, one a frame
+        auto tex = std::make_unique<nxui::Texture>();
+        if (tex->loadFromFile(app().gpu(), app().renderer(), m_animBlurPaths[m_animBlur.size()], 400)) m_animBlur.push_back(std::move(tex));
+        else m_animBlurPaths.clear();
+    }
     const std::size_t n = ready ? static_cast<std::size_t>(m_time * m_animFps) % m_animFrames.size() : 0;
+    m_animCur = n;
     drawCover(r, m_animFrames[n].get(), screen, 0.f, kWhite);
     return true;
 }
@@ -8252,8 +8341,7 @@ void CardsActivity::rebuildStockRow() {
     m_stockSel = 0;
     for (size_t i = 0; keep && i < m_stockRow.size(); ++i)
         if (m_stockRow[i].id == keep) m_stockSel = static_cast<int>(i);
-    m_scroll = static_cast<float>(m_stockSel);
-    wantArt();
+    m_scroll = scrollTarget();
 }
 
 const Game* CardsActivity::gameById(std::uint64_t id) const {
@@ -8348,6 +8436,47 @@ void CardsActivity::openSphaira() {
 #endif
 }
 
+float CardsActivity::scrollTarget() {
+    if (m_stock && m_stockAll) { // the grid scrolls by rows, the chosen one's row in view
+        const int n = static_cast<int>(games().size());
+        const int rows = (n + kGridCols - 1) / kGridCols;
+        return static_cast<float>(std::clamp(sel() / kGridCols - 1, 0, std::max(0, rows - 3)));
+    }
+    return static_cast<float>(sel());
+}
+
+float CardsActivity::riseOrder(int i) const {
+    if (m_stock && m_stockAll) // (rows come in one after another, left to right)
+        return std::max(0.f, static_cast<float>(i / kGridCols) - m_scroll + 0.5f * static_cast<float>(i % kGridCols) + 1.f);
+    return std::max(0.f, static_cast<float>(i) - m_scroll + 1.f);
+}
+
+const nxui::Texture* CardsActivity::stockIconCached(std::uint64_t id) const {
+    const auto it = m_stockIcons.find(id);
+    return it != m_stockIcons.end() && it->second && it->second->valid() ? it->second.get() : nullptr;
+}
+
+// Glass without the live blur: a pre-blurred copy of the background frame (animbg/blur_*.jpg) under the rect.
+void CardsActivity::frostFast(nxui::Renderer& r, const nxui::Rect& rect, float radius, const nxui::Color& tint) {
+    if (m_animCur < m_animBlur.size() && m_animBlur[m_animCur] && m_animBlur[m_animCur]->valid() && rect.x >= 0.f && rect.y >= 0.f
+        && rect.x + rect.width <= 1280.f && rect.y + rect.height <= 720.f) {
+        const nxui::Texture* t = m_animBlur[m_animCur].get();
+        const float kx = static_cast<float>(t->width()) / 1280.f, ky = static_cast<float>(t->height()) / 720.f;
+        r.drawTextureSubRounded(t, {rect.x * kx, rect.y * ky, rect.width * kx, rect.height * ky}, rect, radius, kWhite);
+        r.drawRoundedRect(rect, tint, radius);
+        return;
+    }
+    frost(r, rect, radius, tint);
+}
+
+void CardsActivity::ensureLockFonts() {
+    if (m_lockFonts) return;
+    m_lockFonts = true;
+    const std::string fonts = std::string(kAssets) + "fonts/";
+    m_fLock.load(app().gpu(), app().renderer(), fonts + "Inter-600.ttf", 104);
+    m_fLockDate.load(app().gpu(), app().renderer(), fonts + "Inter-500.ttf", 28);
+}
+
 // One entry of the row: a rounded square icon (the game's own icon, else its cover cropped), the stock
 // selection frame round the chosen one.
 void CardsActivity::drawStockCard(nxui::Renderer& r, const nxui::Rect& card, const Game& g, float t, float alpha,
@@ -8357,7 +8486,7 @@ void CardsActivity::drawStockCard(nxui::Renderer& r, const nxui::Rect& card, con
                       nxui::Color(0.f, 0.f, 0.f, (0.20f + 0.16f * t) * alpha), rad + 2.f);
     const nxui::Color tint = kWhite.withAlpha(alpha);
     if (g.action == "allsoftware") { // frosted tile with a grid of squares
-        frost(r, card, rad, nxui::Color(0.12f, 0.14f, 0.20f, 0.60f * alpha));
+        frostFast(r, card, rad, nxui::Color(0.12f, 0.14f, 0.20f, 0.50f * alpha));
         r.drawRoundedRectOutline(card, nxui::Color(1.f, 1.f, 1.f, 0.25f * alpha), rad, 1.5f);
         const float u = card.width * 0.14f, gap = card.width * 0.05f;
         const float x0 = card.x + (card.width - 3.f * u - 2.f * gap) * 0.5f, y0 = card.y + card.height * 0.5f - 1.5f * u - gap - 14.f;
@@ -8411,7 +8540,8 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         float t = 0.f;
         if (cardRect(sel(), card, t) && a >= 0.999f) {
             const std::string name = fit(m_fTitle, g->name, 640.f, 0.62f);
-            textMid(r, m_fTitle, name, card.x, card.y - 34.f, nxui::Color(0.36f, 0.78f, 1.f, a), 0.62f);
+            const bool grid = m_stockAll;
+            textMid(r, m_fTitle, name, grid ? kGridX : card.x, grid ? 112.f : card.y - 34.f, nxui::Color(0.36f, 0.78f, 1.f, a), 0.62f);
             if (m_zone == Zone::Cards && !m_moving) { // its play time, in a frosted box under it
                 std::string line;
                 if (g->action == "allsoftware") line = std::to_string(std::max<std::size_t>(1, m_stockAll ? m_stockRow.size() : [this] {
@@ -8421,8 +8551,9 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
                 }())) + " titles";
                 else line = g->playSeconds ? playTime(g->playSeconds) + " played" : std::string("Not played yet");
                 const float lw = measured(m_fBody, line).x;
-                const nxui::Rect box{card.x + (card.width - (lw + 44.f)) * 0.5f, card.y + card.height + 18.f, lw + 44.f, 40.f};
-                frost(r, box, 20.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.55f * a));
+                const nxui::Rect box = grid ? nxui::Rect{kGridX + measured(m_fTitle, name).x * 0.62f + 22.f, 92.f, lw + 44.f, 40.f}
+                                            : nxui::Rect{card.x + (card.width - (lw + 44.f)) * 0.5f, card.y + card.height + 18.f, lw + 44.f, 40.f};
+                frostFast(r, box, 20.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.45f * a));
                 r.drawRoundedRectOutline(box, nxui::Color(1.f, 1.f, 1.f, 0.22f * a), 20.f, 1.5f);
                 textMid(r, m_fBody, line, box.x + 22.f, box.y + 20.f, kWhite.withAlpha(a));
             }
@@ -8432,7 +8563,7 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
     // The dock
     const float rise = 40.f * (1.f - a);
     const nxui::Rect pill{kDock.x, kDock.y + rise, kDock.width, kDock.height};
-    frost(r, pill, pill.height * 0.5f, nxui::Color(0.07f, 0.08f, 0.11f, 0.55f * a));
+    frostFast(r, pill, pill.height * 0.5f, nxui::Color(0.07f, 0.08f, 0.11f, 0.45f * a));
     r.drawRoundedRectOutline(pill, nxui::Color(1.f, 1.f, 1.f, 0.22f * a), pill.height * 0.5f, 1.5f);
     r.drawGradientRect({pill.x + 30.f, pill.y + 3.f, pill.width - 60.f, 24.f}, nxui::Color(1.f, 1.f, 1.f, 0.08f * a),
                        nxui::Color(1.f, 1.f, 1.f, 0.f));
@@ -8471,7 +8602,7 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         const std::string label = kLabel[std::clamp(m_dockSel, 0, kDockCount - 1)];
         const float lw = measured(m_fBody, label).x;
         const nxui::Rect lb{dockX(m_dockSel) - (lw + 36.f) * 0.5f, pill.y - 50.f, lw + 36.f, 36.f};
-        frost(r, lb, 18.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.6f));
+        frostFast(r, lb, 18.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.5f));
         r.drawRoundedRectOutline(lb, nxui::Color(1.f, 1.f, 1.f, 0.25f), 18.f, 1.5f);
         textMid(r, m_fBody, label, lb.x + 18.f, lb.y + 18.f, kWhite);
     }
@@ -8620,6 +8751,17 @@ void CardsActivity::drawTopBar(nxui::Renderer& r, float a) {
 }
 
 bool CardsActivity::cardRect(int index, nxui::Rect& card, float& chosen) {
+    if (m_stock && m_stockAll) { // the grid
+        const float col = static_cast<float>(index % kGridCols), row = static_cast<float>(index / kGridCols);
+        const float x = kGridX + col * kGridPitchX, y = kGridY + (row - m_scroll) * kGridPitchY;
+        if (y < 96.f || y + kGridSize > 586.f) return false;
+        const bool isSel = index == sel();
+        chosen = isSel ? 1.f : 0.f;
+        const float grow = isSel ? 16.f : 0.f;
+        const float rise = 1.f - easeOut((m_intro - 0.1f - 0.05f * riseOrder(index)) / 0.5f);
+        card = {x - grow * 0.5f, y - grow * 0.5f - (isSel ? 4.f : 0.f) + 40.f * rise, kGridSize + grow, kGridSize + grow};
+        return true;
+    }
     const float rel = static_cast<float>(index) - m_scroll;
     // A page switch slides the row in from the side.
     float slide = (1.f - easeOut(m_pageIn)) * 160.f * static_cast<float>(m_pageDir);
@@ -8680,7 +8822,7 @@ void CardsActivity::drawCards(nxui::Renderer& r) {
         if (!cardRect(i, card, t)) continue;
         const Game& g = page[(size_t)i];
         if (!m_stock && glassCard(g)) continue; // glass: drawn over the blur (drawCardExtras)
-        const float k = std::max(0.f, static_cast<float>(i) - m_scroll + 1.f);
+        const float k = riseOrder(i);
         const float term = (m_intro - 0.1f - 0.07f * k) / 0.5f;
         const float alpha = pageAlpha * easeOut(term) * making;
         if (alpha <= 0.01f) continue;
@@ -8750,7 +8892,7 @@ void CardsActivity::drawCardExtras(nxui::Renderer& r) {
         nxui::Rect card;
         float t = 0.f;
         if (!cardRect(i, card, t)) continue;
-        const float k = std::max(0.f, static_cast<float>(i) - m_scroll + 1.f);
+        const float k = riseOrder(i);
         const float term = (m_intro - 0.1f - 0.07f * k) / 0.5f;
         const float alpha = easeOut(m_pageIn) * easeOut(term) * making;
         if (alpha <= 0.01f) continue;
@@ -8867,6 +9009,7 @@ void CardsActivity::drawCardExtras(nxui::Renderer& r) {
 }
 
 int CardsActivity::launchStyle() const {
+    if (m_stock && m_settings.motion) return kZoom; // (one smooth way out: the icon opens up)
     return m_settings.motion ? std::clamp(m_settings.launchStyle, 0, kLaunchStyles - 1) : kNoAnimation;
 }
 
@@ -8898,6 +9041,18 @@ void CardsActivity::drawLaunch(nxui::Renderer& r) {
     const int style = launchStyle();
     const Game* g = m_leaveIndex >= 0 && m_leaveIndex < static_cast<int>(games().size()) ? &games()[(size_t)m_leaveIndex]
                                                                                         : nullptr;
+    if (m_stock && g) { // the stock look: the icon opens up into the game, one smooth movement
+        const float open = easeInOut(clamp01((t - 0.04f) / 0.72f));
+        const nxui::Rect rect = lerpRect(m_leaveFrom, screen, open);
+        const float radius = m_leaveFrom.width * 0.2f * (1.f - open);
+        r.drawRoundedRect({rect.x - 8.f, rect.y + 12.f, rect.width + 16.f, rect.height + 16.f},
+                          nxui::Color(0.f, 0.f, 0.f, 0.35f * (1.f - open)), radius + 8.f);
+        const float fade = 1.f - smoothstep(0.35f, 0.85f, t);
+        if (const nxui::Texture* ico = stockIconCached(g->id)) r.drawTextureRounded(ico, rect, radius, kWhite.withAlpha(fade));
+        else r.drawRoundedRect(rect, nxui::Color(0.28f, 0.31f, 0.40f, fade), radius);
+        r.drawRect(screen, nxui::Color(0.f, 0.f, 0.f, smoothstep(0.55f, 1.f, t)));
+        return;
+    }
     auto it = g ? m_art.find(g->id) : m_art.end();
     const Art* art = it != m_art.end() ? &it->second : nullptr;
     const bool glass = g && glassCard(*g);

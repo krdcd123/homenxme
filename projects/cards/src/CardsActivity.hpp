@@ -553,6 +553,19 @@ private:
     int m_stockLoads = 0;
     bool m_statsMode = false;         // the notifications card, showing the most played games
     std::vector<Game> m_statsGames;
+    // The lock screen over a running game: its last frame, blurred.
+    std::unique_ptr<nxui::Texture> m_lockShot;
+    bool m_lockShotBlur = false;   // the blurred copy of m_lockShot is made
+    bool m_lockBlurOk = false;     // a blurred copy of HOME was made since the lock opened
+    bool m_inSleepLock = false;    // lock() was called by the sleep / wake messages (nothing is uploaded then)
+    std::vector<std::string> m_animBlurPaths;
+    std::vector<std::unique_ptr<nxui::Texture>> m_animBlur; // small, pre-blurred copies of the frames (the dock's glass)
+    std::size_t m_animCur = 0;
+    float scrollTarget();
+    float riseOrder(int i) const;
+    void ensureLockFonts();
+    void frostFast(nxui::Renderer& r, const nxui::Rect& rect, float radius, const nxui::Color& tint);
+    const nxui::Texture* stockIconCached(std::uint64_t id) const;
     void rebuildStockRow();
     const nxui::Texture* stockIcon(const Game& g);
     const Game* gameById(std::uint64_t id) const;
