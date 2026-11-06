@@ -570,6 +570,10 @@ void LiteActivity::statusWorker() {
     std::uint64_t quickAt = 0;
     std::uint64_t lastClockMinute = ~0ull;
     while (!m_quit) {
+        if (m_sleepFlag) { // asleep: no clock, battery or network reads (they would wake the processor for nothing)
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            continue;
+        }
         const std::uint64_t now = armTicksToNs(armGetSystemTick()) / 1000000ULL;
         Status s;
         TimeCalendarTime t{};
@@ -714,6 +718,7 @@ void LiteActivity::pumpDaemon() {
                 break;
             case M::SleepSequence: // stop drawing (a loop that keeps drawing never lets it sleep)
                 m_asleep = true;
+                m_sleepFlag = true;
                 m_audio.pause();
                 if (m_settings.lockScreen) { // drawn into the last frames, so waking shows it at once
                     m_inSleepLock = true;
@@ -725,6 +730,7 @@ void LiteActivity::pumpDaemon() {
                 break;
             case M::WakeUp:
                 m_asleep = false;
+                m_sleepFlag = false;
                 app().setSleeping(false);
                 if (m_settings.lockScreen && m_locked) break; // slept while locked: the lock screen is quiet
                 if (m_settings.lockScreen && !m_locked) {

@@ -264,6 +264,7 @@ private:
     std::function<void()> m_leaveThen;
     std::uint64_t m_pendingLaunch = 0;
     bool m_asleep = false, m_inSleepLock = false;
+    std::atomic<bool> m_sleepFlag{false}; // the console is asleep: the status thread reads nothing
 
     // popups
     std::string m_menuTitle;
