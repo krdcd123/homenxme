@@ -3165,7 +3165,7 @@ void CardsActivity::drawLock(nxui::Renderer& r) {
     if (m_stock && m_lockGameId && m_settings.lockGameBanner) {
         // The stock look: a small round icon of the game under the date, with a ring and its name.
         const Game* lg = gameById(m_lockGameId);
-        const float d = 64.f, cy = 408.f + lift;
+        const float d = 64.f, cy = 452.f + lift;
         const nxui::Rect ring{640.f - d * 0.5f, cy - d * 0.5f, d, d};
         frost(r, {ring.x - 6.f, ring.y - 6.f, d + 12.f, d + 12.f}, d * 0.5f + 6.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.5f * a));
         if (const nxui::Texture* ico = lg ? stockIconCached(lg->id) : nullptr) r.drawTextureRounded(ico, ring, d * 0.5f, kWhite.withAlpha(a));
@@ -7150,6 +7150,10 @@ void CardsActivity::onUpdate(float dt) {
     if (!m_lockFonts && m_time > 4.f && !m_leaving && !m_locked) ensureLockFonts(); // (a hitch at idle, not when locking)
     if (m_stock) {
         m_stockLoads = 0;
+        if ((m_factsEvery -= dt) <= 0.f) {
+            m_factsEvery = 15.f;
+            if (!m_quickOpen && !m_sheetOpen && !m_locked) readFactsLater(); // (Wi-Fi and flight mode for the header)
+        }
         if (m_page != kGames) goToPage(kGames, 0); // one row for everything
         if ((m_stockCheck -= dt) <= 0.f) {
             m_stockCheck = 1.f;
@@ -8527,12 +8531,22 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a),
                                  face * 0.5f + 5.f, 3.f);
     const float hy = fr.y + face * 0.5f;
-    float x = 1236.f;
-    x -= measured(m_fPill, m_battery).x;
+    // The time, in the middle
+    textMid(r, m_fLabel, m_clock, 640.f - measured(m_fLabel, m_clock).x * 0.5f, hy, kWhite.withAlpha(a));
+    // Right: Wi-Fi, flight mode (when it's on), the battery and its percentage
+    float x = 1236.f - measured(m_fPill, m_battery).x;
     textMid(r, m_fPill, m_battery, x, hy, kWhite.withAlpha(a));
-    x -= 26.f + measured(m_fPill, m_clock).x;
-    textMid(r, m_fPill, m_clock, x, hy, kWhite.withAlpha(a));
-    r.drawCircle({x - 22.f, hy}, 6.f, (m_online ? kWhite : nxui::Color(0.6f, 0.62f, 0.66f, 1.f)).withAlpha(a), 16);
+    const int charge = m_battery.empty() ? -1 : std::atoi(m_battery.c_str());
+    x -= 14.f + 36.f;
+    switchu::battery_drawing::drawBattery(r, {x, hy - 10.f, 36.f, 20.f}, charge, m_charging, a);
+    if (m_quick.airplane) {
+        x -= 16.f + 26.f;
+        icon(r, "airplane", x + 13.f, hy, 26.f, kWhite.withAlpha(a));
+    } else {
+        x -= 16.f + 26.f;
+        icon(r, "wifi", x + 13.f, hy, 26.f, kWhite.withAlpha((m_online ? 1.f : 0.4f) * a));
+        if (!m_online) r.drawLine({x + 2.f, hy + 11.f}, {x + 24.f, hy - 11.f}, kWhite.withAlpha(0.7f * a), 2.5f);
+    }
 
     // The chosen one's name, in blue above its icon
     if (const Game* g = current()) {

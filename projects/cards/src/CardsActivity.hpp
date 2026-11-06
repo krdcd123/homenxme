@@ -561,6 +561,7 @@ private:
     std::vector<std::string> m_animBlurPaths;
     std::vector<std::unique_ptr<nxui::Texture>> m_animBlur; // small, pre-blurred copies of the frames (the dock's glass)
     std::size_t m_animCur = 0;
+    float m_factsEvery = 5.f;   // the stock header's Wi-Fi / flight mode, read again now and then
     float scrollTarget();
     float riseOrder(int i) const;
     void ensureLockFonts();

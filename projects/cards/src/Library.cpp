@@ -475,7 +475,23 @@ int installedTitleCount() {
 }
 
 std::vector<std::uint8_t> gameIcon(const Game& game) {
-    return game.path.empty() ? switchu::control_cache::readIcon(game.id) : readHomebrewIcon(game.path);
+    if (!game.path.empty()) return readHomebrewIcon(game.path);
+    std::vector<std::uint8_t> icon = switchu::control_cache::readIcon(game.id);
+    if (!icon.empty()) return icon;
+    // Not in HOME's cache (the meta was there, the picture wasn't): the game's own icon from the system, kept for next time.
+    std::unique_ptr<NsApplicationControlData> control(new (std::nothrow) NsApplicationControlData);
+    u64 size = 0;
+    if (control && R_SUCCEEDED(nsGetApplicationControlData(NsApplicationControlSource_Storage, game.id, control.get(),
+                                                           sizeof(NsApplicationControlData), &size))
+        && size > sizeof(NacpStruct)) {
+        switchu::control_cache::writeFromControlData(game.id, *control, size);
+        icon = switchu::control_cache::readIcon(game.id);
+        if (icon.empty()) {
+            const std::size_t n = std::min<std::size_t>(size - sizeof(NacpStruct), sizeof(control->icon));
+            icon.assign(control->icon, control->icon + n);
+        }
+    }
+    return icon;
 }
 
 bool startNetwork() {
