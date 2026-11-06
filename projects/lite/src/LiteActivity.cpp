@@ -353,12 +353,25 @@ void LiteActivity::rebuildList() {
         return;
     }
     const std::uint64_t keep = !m_list.empty() && m_sel >= 0 && m_sel < static_cast<int>(m_list.size()) ? m_list[(std::size_t)m_sel].id : 0;
+    std::unordered_map<std::uint64_t, float> oldRel; // where each card was, for the move to the new order
+    if (!m_grid && !m_list.empty())
+        for (std::size_t i = 0; i < m_list.size(); ++i) oldRel[m_list[i].id] = static_cast<float>(i) - m_scroll;
     m_list = std::move(all);
     m_sel = 0;
     for (std::size_t i = 0; keep && i < m_list.size(); ++i)
         if (m_list[i].id == keep) m_sel = static_cast<int>(i);
     m_scroll = scrollTarget();
     m_iconWantSel = ~0ull;
+    m_slideFrom.clear(); // the cards slide to their new places (not a jump)
+    if (!oldRel.empty() && !m_grid && m_settings.motion) {
+        for (std::size_t j = 0; j < m_list.size(); ++j) {
+            const auto it = oldRel.find(m_list[j].id);
+            if (it == oldRel.end()) continue;
+            const float from = it->second - (static_cast<float>(j) - m_scroll);
+            if (std::abs(from) > 0.01f) m_slideFrom[m_list[j].id] = from;
+        }
+        m_slideT = m_slideFrom.empty() ? 1.f : 0.f;
+    }
 }
 
 const Game* LiteActivity::current() {
@@ -413,11 +426,31 @@ void LiteActivity::openAllSoftware(bool on) {
     m_grid = on;
     m_sel = 0;
     m_list.clear();
+    m_slideFrom.clear();
+    m_slideT = 1.f;
     rebuildList();
+    if (!on) // back to the row: the All Software tile is the chosen one
+        for (std::size_t i = 0; i < m_list.size(); ++i)
+            if (m_list[i].action == "allsoftware") m_sel = static_cast<int>(i);
     m_scroll = scrollTarget();
+    if (on) m_gridT = 0.f;                    // the tiles come together
+    else m_intro = std::min(m_intro, 0.35f); // the row's cards rise back in
     m_iconWantSel = ~0ull;
     m_audio.play(on ? "navigation" : "hide_modal");
     wantIcons();
+}
+
+// A grid tile's way into place: they start spread outward and small, and come together from the middle out.
+float LiteActivity::gridTerm(int index) const {
+    const float col = static_cast<float>(index % kGridCols), row = static_cast<float>(index / kGridCols);
+    const float ord = std::max(0.f, row - m_scroll) * 0.5f + std::abs(col - 3.f) * 0.35f;
+    return clamp01((m_gridT - 0.045f * ord) / 0.5f);
+}
+
+float LiteActivity::slideOf(std::uint64_t id) const {
+    if (m_slideT >= 1.f) return 0.f;
+    const auto it = m_slideFrom.find(id);
+    return it == m_slideFrom.end() ? 0.f : it->second * (1.f - easeOut(m_slideT));
 }
 
 bool LiteActivity::cardRect(int index, nxui::Rect& card, float& chosen) {
@@ -428,11 +461,23 @@ bool LiteActivity::cardRect(int index, nxui::Rect& card, float& chosen) {
         const bool isSel = index == m_sel;
         chosen = isSel ? 1.f : 0.f;
         const float grow = isSel ? 16.f : 0.f;
-        const float rise = 1.f - easeOut((m_intro - 0.1f - 0.05f * riseOrder(index)) / 0.5f);
-        card = {x - grow * 0.5f, y - grow * 0.5f - (isSel ? 4.f : 0.f) + 40.f * rise, kGridSize + grow, kGridSize + grow};
+        float cx = x + (kGridSize + grow) * 0.0f, cy = y - (isSel ? 4.f : 0.f);
+        float size = kGridSize + grow;
+        if (m_gridT < 1.f) { // coming together: from further out and smaller
+            const float e = easeOut(gridTerm(index));
+            const float mx = kGridX + 3.f * kGridPitchX + kGridSize * 0.5f, my = 330.f;
+            const float tx = x + kGridSize * 0.5f, ty = y + kGridSize * 0.5f;
+            const float fx = tx + (tx - mx) * 0.5f * (1.f - e), fy = ty + (ty - my) * 0.5f * (1.f - e);
+            size *= 0.55f + 0.45f * e;
+            cx = fx - size * 0.5f;
+            cy = fy - size * 0.5f;
+            card = {cx, cy, size, size};
+            return true;
+        }
+        card = {x - grow * 0.5f, cy - grow * 0.5f, size, size};
         return true;
     }
-    const float rel = static_cast<float>(index) - m_scroll;
+    const float rel = static_cast<float>(index) - m_scroll + (index < static_cast<int>(m_list.size()) ? slideOf(m_list[(std::size_t)index].id) : 0.f);
     float slide = 0.f;
     if (m_leaving && m_leaveIndex >= 0 && index != m_leaveIndex) // launching: the others make way
         slide += (index < m_leaveIndex ? -1.f : 1.f) * 420.f * easeIn(m_leaveT / 0.5f);
@@ -735,6 +780,7 @@ void LiteActivity::pumpDaemon() {
                 m_asleep = false;
                 m_sleepFlag = false;
                 app().setSleeping(false);
+                if (m_settings.lockScreen) buzz(); // a light buzz as it comes on to the lock screen
                 if (m_settings.lockScreen && m_locked) break; // slept while locked: the lock screen is quiet
                 if (m_settings.lockScreen && !m_locked) {
                     m_inSleepLock = true;
@@ -1001,6 +1047,12 @@ void LiteActivity::onUpdate(float dt) {
     pumpDaemon();
     if (m_asleep) return;
     m_running = runningId(); // (read once a frame: the cards that say Resume)
+    if (m_buzzFor > 0.f && (m_buzzFor -= dt) <= 0.f) { // the buzz ends
+        HidVibrationValue off{};
+        off.freq_low = 160.f;
+        off.freq_high = 320.f;
+        for (int i = 0; i < m_vibCount; ++i) hidSendVibrationValue(m_vib[i], &off);
+    }
     m_time += dt;
     app().input().mergeRightStick();
     {
@@ -1010,7 +1062,7 @@ void LiteActivity::onUpdate(float dt) {
         const float hz = 60.f / static_cast<float>(every > 1 ? every : 3);
         m_beat = std::floor(m_time * hz) / hz;
         if (app().input().hasUserActivity()) m_busyUntil = m_time + 0.7f;
-        m_moving = m_intro < 1.f || m_menuIn < 1.f || m_statsIn < 1.f || m_galIn < 1.f || m_pressT < 1.f || m_pageIn < 1.f
+        m_moving = m_intro < 1.f || m_gridT < 1.f || m_slideT < 1.f || m_menuIn < 1.f || m_statsIn < 1.f || m_galIn < 1.f || m_pressT < 1.f || m_pageIn < 1.f
                    || std::abs(m_scroll - scrollTarget()) > 0.001f || m_leaving || m_returnTex || m_messageFor > 0.f
                    || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
     }
@@ -1066,6 +1118,8 @@ void LiteActivity::onUpdate(float dt) {
     const bool motion = m_settings.motion;
     auto step = [&](float& v, float seconds) { v = motion ? std::min(1.f, v + dt / seconds) : 1.f; };
     if (!m_returnTex || m_returnT > 0.f) step(m_intro, m_introFor);
+    step(m_gridT, 0.7f);
+    step(m_slideT, 0.45f);
     step(m_menuIn, 0.2f);
     step(m_statsIn, 0.2f);
     step(m_galIn, 0.26f);
@@ -1244,7 +1298,7 @@ void LiteActivity::onUpdate(float dt) {
             activateDock(m_dockSel);
         }
     }
-    if (bDown && m_grid && m_zone == Zone::Cards) openAllSoftware(false);
+    if (bDown && m_grid) openAllSoftware(false); // (B from All Software goes back to the row, wherever the choice is)
     else if (bDown && m_zone != Zone::Cards) m_zone = Zone::Cards;
     if (in.isDown(B::Plus)) openOptions();
     if (in.isDown(B::X)) askClose();
@@ -1263,6 +1317,27 @@ int LiteActivity::frameInterval() const {
         return m_animFps <= 30.f ? 2 : 1;
     }
     return 4; // nothing but the slow pulse of the chosen one's ring: 15 a second
+}
+
+// A short, light buzz in the controllers: the console's own when it wakes up to the lock screen.
+void LiteActivity::buzz() {
+    if (!m_vibTried) {
+        m_vibTried = true;
+        HidVibrationDeviceHandle h[2];
+        if (R_SUCCEEDED(hidInitializeVibrationDevices(h, 2, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld)))
+            for (int i = 0; i < 2; ++i) m_vib[m_vibCount++] = h[i];
+        if (R_SUCCEEDED(hidInitializeVibrationDevices(h, 2, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual)))
+            for (int i = 0; i < 2; ++i) m_vib[m_vibCount++] = h[i];
+        if (m_vibCount < 5 && R_SUCCEEDED(hidInitializeVibrationDevices(h, 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey)))
+            m_vib[m_vibCount++] = h[0];
+    }
+    HidVibrationValue v{};
+    v.amp_low = 0.22f;
+    v.freq_low = 160.f;
+    v.amp_high = 0.22f;
+    v.freq_high = 320.f;
+    for (int i = 0; i < m_vibCount; ++i) hidSendVibrationValue(m_vib[i], &v);
+    m_buzzFor = m_vibCount ? 0.14f : 0.f;
 }
 
 } // namespace lite

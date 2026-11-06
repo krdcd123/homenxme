@@ -71,6 +71,9 @@ private:
     void applyRecent();
     void noteRecent(const std::string& path);
     void rebuildList();
+    float gridTerm(int index) const;      // how far a grid tile is on its way into place (0..1)
+    float slideOf(std::uint64_t id) const; // a row card on its way to a new place, in cards
+    void buzz();                          // a short, light vibration of the controllers (waking to the lock screen)
     void select(int index);
     void selectById(std::uint64_t id);
     const Game* current();
@@ -195,6 +198,13 @@ private:
     float m_time = 0.f;
     float m_beat = 0.f;      // m_time in the steps of the frames that are drawn (so the pulses step evenly)
     std::uint64_t m_running = 0; // the game or app that is open (suspended)
+    float m_gridT = 1.f;     // All Software: the tiles coming together
+    float m_slideT = 1.f;    // the row's cards settling after the order changed
+    std::unordered_map<std::uint64_t, float> m_slideFrom;
+    HidVibrationDeviceHandle m_vib[5]{};
+    int m_vibCount = 0;
+    bool m_vibTried = false;
+    float m_buzzFor = 0.f;
     float m_busyUntil = 0.f; // a press, a touch or a movement: every refresh is drawn until then
     bool m_moving = false;   // something is animating
     int m_startStage = 0;

@@ -285,7 +285,7 @@ void LiteActivity::drawCards(nxui::Renderer& r) {
         float t = 0.f;
         if (!cardRect(i, card, t)) continue;
         const float term = (m_intro - 0.1f - 0.07f * riseOrder(i)) / 0.5f;
-        const float alpha = easeOut(term) * making;
+        const float alpha = (m_grid ? clamp01(gridTerm(i) * 2.2f) : easeOut(term)) * making;
         if (alpha <= 0.01f) continue;
         const float pressed = m_pressIndex == i ? std::sin(clamp01(m_pressT) * 3.14159f) : 0.f;
         if (pressed > 0.f) card = scaled(card, 1.f - 0.05f * pressed);
