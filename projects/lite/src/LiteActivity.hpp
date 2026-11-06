@@ -101,6 +101,7 @@ private:
         cards::QuickStatus quick;
     };
     void statusWorker();
+    void watchdog();
     void takeStatus();
 
     // ---- starting things

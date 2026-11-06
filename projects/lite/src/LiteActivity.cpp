@@ -193,6 +193,7 @@ bool LiteActivity::onCreate() {
 
     m_threads.emplace_back([this]() { iconWorker(); });
     m_threads.emplace_back([this]() { statusWorker(); });
+    m_threads.emplace_back([this]() { watchdog(); });
     wantIcons();
 
     if (m_atBoot && m_settings.lockScreen) lock();
@@ -218,6 +219,7 @@ bool LiteActivity::presentInitialFrame(nxui::Renderer& ren) {
 }
 
 void LiteActivity::onDestroy() {
+    switchu::FileLog::logCommit("[lite] closing");
     m_quit = true;
     m_cv.notify_all();
     for (std::thread& t : m_threads)
@@ -229,12 +231,14 @@ void LiteActivity::onDestroy() {
     if (m_galJob.valid()) m_galJob.wait();
     if (m_galBigJob.valid()) m_galBigJob.wait();
     if (m_lockJob.valid()) m_lockJob.wait();
+    switchu::FileLog::logCommit("[lite] threads stopped");
     switchu::menu::smi_cmd::menuClosing();
     nifmExit();
     pdmqryExit();
     m_settings.save();
     cards::flushWrites();
     m_audio.stop();
+    switchu::FileLog::logCommit("[lite] closed");
 }
 
 // ---------------------------------------------------------------- the lists
@@ -712,6 +716,7 @@ void LiteActivity::syncHomebrewFlag() {
 }
 
 void LiteActivity::pumpDaemon() {
+    nxui::setPhase("lite: the daemon's messages");
     AppletStorage st;
     while (R_SUCCEEDED(appletPopInteractiveInData(&st))) {
         switchu::smi::DaemonNotification n{};
@@ -986,6 +991,7 @@ void LiteActivity::activateDock(int index) {
 
 // HOME pressed while HOME shows: things close; else back to the open game; else the first card.
 void LiteActivity::handleHome() {
+    switchu::FileLog::log("[lite] home pressed");
     if (m_locked) { // HOME opens the lock screen too (not past a password)
         if (m_pwSetup) { // stops making one
             m_pwSetup = false;
@@ -1338,6 +1344,40 @@ void LiteActivity::buzz() {
     v.freq_high = 320.f;
     for (int i = 0; i < m_vibCount; ++i) hidSendVibrationValue(m_vib[i], &v);
     m_buzzFor = m_vibCount ? 0.14f : 0.f;
+}
+
+// A thread that only watches: if the screen's thread stays in one step for seconds, the step is written to the log
+// (and flushed at once), so a freeze can be traced to where it stopped.
+void LiteActivity::watchdog() {
+    nxui::moveToWorkerCores();
+    svcSetThreadPriority(CUR_THREAD_HANDLE, 0x2C);
+    std::uint32_t serial = nxui::g_phaseSerial.load();
+    std::uint64_t since = armGetSystemTick(), woke = since;
+    bool told = false;
+    int lines = 0;
+    while (!m_quit) {
+        svcSleepThread(250'000'000ULL);
+        const std::uint64_t now = armGetSystemTick();
+        const float away = static_cast<float>(armTicksToNs(now - woke)) / 1.0e6f - 250.f;
+        woke = now;
+        const std::uint32_t s = nxui::g_phaseSerial.load();
+        if (away > 1500.f || m_sleepFlag) { // (all of HOME was stopped, or the console sleeps: nothing to blame)
+            serial = s;
+            since = now;
+            told = false;
+            continue;
+        }
+        if (s != serial) {
+            if (told) switchu::FileLog::logCommit("[lite] the wait ended after %.1f s", static_cast<float>(armTicksToNs(now - since)) / 1.0e9f);
+            serial = s;
+            since = now;
+            told = false;
+        } else if (!told && lines < 30 && static_cast<float>(armTicksToNs(now - since)) / 1.0e9f > 1.5f) {
+            told = true;
+            ++lines;
+            switchu::FileLog::logCommit("[lite] the screen's thread has been in \"%s\" for over 1.5 s", nxui::g_phase.load());
+        }
+    }
 }
 
 } // namespace lite

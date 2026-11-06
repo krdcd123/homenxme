@@ -118,8 +118,11 @@ void LiteActivity::draw(nxui::Renderer& r) {
             return;
         }
     }
+    nxui::setPhase("lite: the background");
     drawBackground(r);
+    nxui::setPhase("lite: the cards");
     drawCards(r);
+    nxui::setPhase("lite: the bars and popups");
     // Launching: the bar goes first.
     const float ui = m_leaving ? 1.f - easeOut(m_leaveT / 0.3f) : 1.f;
     drawChrome(r, easeOut(m_intro * 2.f) * ui);
@@ -127,8 +130,10 @@ void LiteActivity::draw(nxui::Renderer& r) {
     drawMenu(r);
     drawStats(r);
     drawGallery(r);
+    nxui::setPhase("lite: opening and closing a game");
     drawLaunch(r);
     drawReturn(r);
+    nxui::setPhase("lite: the lock screen");
     // The lock screen over HOME: HOME is blurred once (again every few frames while it opens).
     if (m_locked) {
         m_frosted = r.gpu().offscreenReady() && !m_gpuSlow;
