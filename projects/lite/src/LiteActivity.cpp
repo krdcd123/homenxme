@@ -1386,19 +1386,33 @@ void LiteActivity::watchdog() {
 
 // Which controllers are connected (read from the shared memory: no service call), twice a second.
 void LiteActivity::readPads() {
-    std::vector<int> now;
+    std::vector<PadInfo> now;
     static const HidNpadIdType kIds[] = {HidNpadIdType_Handheld, HidNpadIdType_No1, HidNpadIdType_No2, HidNpadIdType_No3,
                                          HidNpadIdType_No4,      HidNpadIdType_No5, HidNpadIdType_No6, HidNpadIdType_No7,
                                          HidNpadIdType_No8};
     for (const HidNpadIdType id : kIds) {
         const u32 s = hidGetNpadStyleSet(id);
         if (!s) continue;
-        if (s & HidNpadStyleTag_NpadHandheld) now.push_back(kHandheld);
-        else if (s & HidNpadStyleTag_NpadJoyDual) now.push_back(kJoyDual);
-        else if (s & HidNpadStyleTag_NpadFullKey) now.push_back(kPro);
-        else if (s & HidNpadStyleTag_NpadJoyLeft) now.push_back(kJoyLeft);
-        else if (s & HidNpadStyleTag_NpadJoyRight) now.push_back(kJoyRight);
-        else now.push_back(kOtherPad);
+        PadInfo p;
+        if (s & HidNpadStyleTag_NpadHandheld) p.kind = kHandheld; // (the console's own battery is at the top right)
+        else if (s & HidNpadStyleTag_NpadJoyDual) p.kind = kJoyDual;
+        else if (s & HidNpadStyleTag_NpadFullKey) p.kind = kPro;
+        else if (s & HidNpadStyleTag_NpadJoyLeft) p.kind = kJoyLeft;
+        else if (s & HidNpadStyleTag_NpadJoyRight) p.kind = kJoyRight;
+        else p.kind = kOtherPad;
+        HidPowerInfo one{}, left{}, right{};
+        if (p.kind == kJoyDual) {
+            hidGetNpadPowerInfoSplit(id, &left, &right);
+            p.level[0] = static_cast<int>(std::min<u32>(left.battery_level, 4));
+            p.level[1] = static_cast<int>(std::min<u32>(right.battery_level, 4));
+            p.charging[0] = left.is_charging;
+            p.charging[1] = right.is_charging;
+        } else if (p.kind != kHandheld) {
+            hidGetNpadPowerInfoSingle(id, &one);
+            p.level[0] = static_cast<int>(std::min<u32>(one.battery_level, 4));
+            p.charging[0] = one.is_charging;
+        }
+        now.push_back(p);
     }
     if (now.size() > 4) now.resize(4);
     m_pads = std::move(now);

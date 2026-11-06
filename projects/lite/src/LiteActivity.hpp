@@ -209,7 +209,12 @@ private:
     bool m_vibTried = false;
     float m_buzzFor = 0.f;
     enum PadKind { kHandheld, kJoyDual, kJoyLeft, kJoyRight, kPro, kOtherPad };
-    std::vector<int> m_pads; // the kinds of controller connected, in player order
+    struct PadInfo {
+        int kind = 0;
+        int level[2] = {-1, -1}; // battery 0-4 (-1: none to show); a Joy-Con pair has one each
+        bool charging[2] = {false, false};
+    };
+    std::vector<PadInfo> m_pads; // the controllers connected, in player order
     float m_padsIn = 0.f;
     float m_busyUntil = 0.f; // a press, a touch or a movement: every refresh is drawn until then
     bool m_moving = false;   // something is animating

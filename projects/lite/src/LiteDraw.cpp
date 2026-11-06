@@ -366,11 +366,22 @@ void LiteActivity::drawStatus(nxui::Renderer& r, float a, float hy, bool withClo
 // two Joy-Con, one Joy-Con, a Pro Controller.
 void LiteActivity::drawPads(nxui::Renderer& r, float a, float rise) {
     float x = 54.f;
-    const float cy = dockY() + rise;
+    const float cy = dockY() + rise - 4.f;
     const nxui::Color c = kWhite.withAlpha(0.92f * a);
     const float w = 2.2f;
-    for (const int kind : m_pads) {
-        switch (kind) {
+    // Four small segments under a controller (or under each Joy-Con): lit by the battery's level, red when it's nearly
+    // empty, green while it charges.
+    auto battery = [&](float bx, float width, int level, bool charging) {
+        if (level < 0) return;
+        const float gap = 1.2f, seg = (width - 3.f * gap) / 4.f, y = cy + 19.f;
+        for (int i = 0; i < 4; ++i) {
+            const bool lit = i < std::max(level, charging ? 4 : 0);
+            const nxui::Color col = charging ? kGreen : level <= 1 ? kRed : kWhite;
+            r.drawRoundedRect({bx + static_cast<float>(i) * (seg + gap), y, seg, 5.f}, lit ? col.withAlpha(0.95f * a) : kWhite.withAlpha(0.22f * a), 1.2f);
+        }
+    };
+    for (const PadInfo& pad : m_pads) {
+        switch (pad.kind) {
             case kHandheld: { // the console: a screen between the two Joy-Con
                 r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
                 r.drawRoundedRectOutline({x + 17.f, cy - 12.f, 36.f, 24.f}, c, 4.f, w);
@@ -380,33 +391,39 @@ void LiteActivity::drawPads(nxui::Renderer& r, float a, float rise) {
                 x += 70.f + 26.f;
                 break;
             }
-            case kJoyDual: // two Joy-Con side by side
+            case kJoyDual: // two Joy-Con side by side, a battery under each
                 r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
                 r.drawRoundedRectOutline({x + 19.f, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
                 r.drawCircle({x + 7.5f, cy - 5.f}, 2.6f, c, 12);
                 r.drawCircle({x + 26.5f, cy + 5.f}, 2.6f, c, 12);
+                battery(x, 15.f, pad.level[0], pad.charging[0]);
+                battery(x + 19.f, 15.f, pad.level[1], pad.charging[1]);
                 x += 34.f + 26.f;
                 break;
             case kJoyLeft:
                 r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
                 r.drawCircle({x + 7.5f, cy - 5.f}, 2.6f, c, 12);
+                battery(x, 15.f, pad.level[0], pad.charging[0]);
                 x += 15.f + 26.f;
                 break;
             case kJoyRight:
                 r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
                 r.drawCircle({x + 7.5f, cy + 5.f}, 2.6f, c, 12);
+                battery(x, 15.f, pad.level[0], pad.charging[0]);
                 x += 15.f + 26.f;
                 break;
             case kPro: // a Pro Controller: wide, two sticks, grips
                 r.drawRoundedRectOutline({x, cy - 13.f, 46.f, 26.f}, c, 12.f, w);
                 r.drawCircle({x + 13.f, cy - 3.f}, 3.4f, c, 12);
                 r.drawCircle({x + 31.f, cy + 4.f}, 3.4f, c, 12);
+                battery(x + 9.f, 28.f, pad.level[0], pad.charging[0]);
                 x += 46.f + 26.f;
                 break;
             default: // anything else
                 r.drawRoundedRectOutline({x, cy - 11.f, 38.f, 22.f}, c, 10.f, w);
                 r.drawCircle({x + 12.f, cy}, 3.f, c, 12);
                 r.drawCircle({x + 26.f, cy}, 3.f, c, 12);
+                battery(x + 5.f, 28.f, pad.level[0], pad.charging[0]);
                 x += 38.f + 26.f;
                 break;
         }
