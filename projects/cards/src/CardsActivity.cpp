@@ -2881,13 +2881,48 @@ void CardsActivity::openWallpapers(bool lockScreen) {
 
 namespace {
 constexpr int kGalleryPage = 12; // the Album's grid: screenshots a page
+
+bool isVideoFile(const std::string& path) {
+    return lower(std::filesystem::path(path).extension().string()) == ".mp4";
+}
+
+// A video has no picture HOME can read (it can't decode one), so its tile is drawn: a dark gradient and a play button.
+std::vector<std::uint8_t> videoTile(int w, int h) {
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
+    const float cx = static_cast<float>(w) * 0.5f, cy = static_cast<float>(h) * 0.5f, R = static_cast<float>(h) * 0.19f;
+    for (int y = 0; y < h; ++y) {
+        const float t = static_cast<float>(y) / static_cast<float>(std::max(1, h - 1));
+        for (int x = 0; x < w; ++x) {
+            float r = 22.f + 30.f * t, g = 28.f + 34.f * t, b = 46.f + 52.f * t;
+            const float dx = static_cast<float>(x) - cx, dy = static_cast<float>(y) - cy;
+            if (dx * dx + dy * dy <= R * R) { r += 55.f; g += 55.f; b += 60.f; } // the disc
+            // the triangle (pointing right) inside it
+            const float tx = dx + R * 0.30f, ty = dy;
+            if (tx >= -R * 0.45f && tx <= R * 0.55f && std::abs(ty) <= (R * 0.55f - tx) * 0.95f * 0.85f + 0.f) { r = g = b = 245.f; }
+            std::uint8_t* p = &px[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4u];
+            p[0] = static_cast<std::uint8_t>(std::min(255.f, r));
+            p[1] = static_cast<std::uint8_t>(std::min(255.f, g));
+            p[2] = static_cast<std::uint8_t>(std::min(255.f, b));
+            p[3] = 255;
+        }
+    }
+    return px;
+}
 } // namespace
 
 // The Album's grid, a page at a time: the screenshots from `from`, shrunk.
 std::vector<TitleChoice> CardsActivity::galleryPage(const std::vector<std::string>& all, size_t from) {
     std::vector<TitleChoice> out;
     for (size_t i = from; i < all.size() && i < from + kGalleryPage; ++i) {
-        Pixels px = readPicture(all[i], 320);
+        const bool video = isVideoFile(all[i]);
+        Pixels px;
+        if (video) {
+            px.rgba = videoTile(320, 180);
+            px.w = 320;
+            px.h = 180;
+        } else {
+            px = readPicture(all[i], 320);
+        }
         if (px.rgba.empty()) continue;
         const std::string n = std::filesystem::path(all[i]).filename().string(); // YYYYMMDDhhmmss...
         TitleChoice c;
@@ -2895,6 +2930,7 @@ std::vector<TitleChoice> CardsActivity::galleryPage(const std::vector<std::strin
         c.label = n.size() >= 12 ? n.substr(6, 2) + "/" + n.substr(4, 2) + "/" + n.substr(0, 4) + " " + n.substr(8, 2) + ":"
                                        + n.substr(10, 2)
                                  : std::string();
+        if (video) c.label = (c.label.empty() ? std::string("Video") : c.label + "  Video");
         c.rgba = std::move(px.rgba);
         c.w = px.w;
         c.h = px.h;
@@ -2934,7 +2970,7 @@ void CardsActivity::openGallery() {
     m_galleryPage = 0;
     m_pickJob = std::async(std::launch::async, [all]() {
         offScreenCore();
-        *all = switchu::lockpicture::newestScreenshots(100000); // all of them (they were 300, 12 shown)
+        *all = switchu::lockpicture::newestScreenshots(100000, true); // all of them, videos too (they were 300, 12 shown)
         auto out = galleryPage(*all, 0);
         threadDone();
         return out;
@@ -2952,6 +2988,13 @@ void CardsActivity::loadGalleryPicture() {
     const std::string path = (*m_galleryAll)[(size_t)m_galleryAt];
     m_galleryJob = std::async(std::launch::async, [path]() {
         offScreenCore();
+        if (isVideoFile(path)) { // (no player here: the big play button stands for it)
+            Pixels px;
+            px.rgba = videoTile(1280, 720);
+            px.w = 1280;
+            px.h = 720;
+            return px;
+        }
         return readPicture(path, 1280);
     });
 }
@@ -3746,6 +3789,7 @@ void CardsActivity::pickChoice(int index) {
         m_galleryView = true;
         loadGalleryPicture();
         m_audio.play("activation");
+        if (isVideoFile(file)) say("Videos can't be played in HOME yet: play them from a media app.");
         return;
     }
     if (m_pickWall) { // a background, or the lock screen's picture
@@ -3798,7 +3842,9 @@ void CardsActivity::updatePicker() {
             loadGalleryPicture();
             m_audio.play("navigation");
         }
-        if (n > 0 && (in.isDown(B::Y) || in.isDown(B::X))) {
+        if (n > 0 && (in.isDown(B::Y) || in.isDown(B::X)) && isVideoFile((*m_galleryAll)[(size_t)m_galleryAt])) {
+            say("A video can't be a background.");
+        } else if (n > 0 && (in.isDown(B::Y) || in.isDown(B::X))) {
             const std::string path = (*m_galleryAll)[(size_t)m_galleryAt];
             const bool lockScreen = in.isDown(B::X);
             m_galleryView = false;
@@ -8583,9 +8629,7 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a),
                                  face * 0.5f + 5.f, 3.f);
     const float hy = fr.y + face * 0.5f;
-    // The time, in the middle
-    textMid(r, m_fLabel, m_clock, 640.f - measured(m_fLabel, m_clock).x * 0.5f, hy, kWhite.withAlpha(a));
-    // Right: Wi-Fi, flight mode (when it's on), the battery and its percentage
+    // Right: the time, Wi-Fi, flight mode (when it's on), the battery and its percentage
     float x = 1236.f - measured(m_fPill, m_battery).x;
     textMid(r, m_fPill, m_battery, x, hy, kWhite.withAlpha(a));
     const int charge = m_battery.empty() ? -1 : std::atoi(m_battery.c_str());
@@ -8599,6 +8643,8 @@ void CardsActivity::drawStockChrome(nxui::Renderer& r, float a) {
         icon(r, "wifi", x + 13.f, hy, 26.f, kWhite.withAlpha((m_online ? 1.f : 0.4f) * a));
         if (!m_online) r.drawLine({x + 2.f, hy + 11.f}, {x + 24.f, hy - 11.f}, kWhite.withAlpha(0.7f * a), 2.5f);
     }
+    x -= 22.f + measured(m_fPill, m_clock).x;
+    textMid(r, m_fPill, m_clock, x, hy, kWhite.withAlpha(a));
 
     // The chosen one's name, in blue above its icon
     if (const Game* g = current()) {

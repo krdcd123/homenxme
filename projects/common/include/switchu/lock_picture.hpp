@@ -107,9 +107,10 @@ inline std::vector<std::string> albumFolders() {
 
 // The newest screenshots in every Album, newest first (its folders are the date:
 // year, month, day; the files start with the time).
-inline std::vector<std::string> newestScreenshots(size_t count) {
+// videos: the Album's .mp4 captures too (the pickers for backgrounds want pictures only; the gallery wants everything).
+inline std::vector<std::string> newestScreenshots(size_t count, bool videos = false) {
     using Named = std::map<std::string, std::vector<std::string>, std::greater<>>;
-    auto inside = [](const std::vector<std::string>& dirs, bool pictures) { // by name, the newest first
+    auto inside = [videos](const std::vector<std::string>& dirs, bool pictures) { // by name, the newest first
         Named out;
         std::error_code ec;
         for (const std::string& dir : dirs)
@@ -117,7 +118,7 @@ inline std::vector<std::string> newestScreenshots(size_t count) {
                 if (pictures) {
                     std::string ext = e.path().extension().string();
                     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
-                    if (!e.is_regular_file(ec) || ext != ".jpg") continue;
+                    if (!e.is_regular_file(ec) || (ext != ".jpg" && !(videos && ext == ".mp4"))) continue;
                 } else if (!e.is_directory(ec)) {
                     continue;
                 }
