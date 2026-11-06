@@ -207,10 +207,10 @@ bool LiteActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scree
     // A finished decode goes up as a texture; the one on screen is replaced when the next one is the one wanted.
     if (m_animJob.valid() && m_animJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         Pixels px = m_animJob.get();
-        if (!px.rgba.empty()) {
+        if (px.raw) {
             auto tex = std::make_unique<nxui::Texture>();
             nxui::GpuDevice::EssentialScope essential; // (two frames: always wanted)
-            if (tex->loadFromPixels(app().gpu(), app().renderer(), px.rgba.data(), px.w, px.h)) {
+            if (tex->loadFromPixels(app().gpu(), app().renderer(), px.raw.get(), px.w, px.h)) {
                 m_animNextTex = std::move(tex);
                 m_animNextIdx = m_animJobIdx;
             }
@@ -226,13 +226,13 @@ bool LiteActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scree
     const int want = m_animTexIdx == static_cast<int>(idx) ? static_cast<int>((idx + 1) % n) : static_cast<int>(idx);
     if (!m_animJob.valid() && m_animNextIdx != want && m_animTexIdx != want) {
         m_animJobIdx = want;
-        m_animJob = std::async(std::launch::async, [data = m_animJpegs[static_cast<std::size_t>(want)]]() {
+        // (the pictures are all in before the first decode and never change: no copy of the JPEG, none of the pixels)
+        m_animJob = std::async(std::launch::async, [data = &m_animJpegs[static_cast<std::size_t>(want)]]() {
             offScreenCore();
             Pixels px;
             int w = 0, h = 0;
-            if (stbi_uc* p = cards::decodePicture(data.data(), static_cast<int>(data.size()), w, h)) {
-                px.rgba.assign(p, p + static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
-                stbi_image_free(p);
+            if (stbi_uc* p = cards::decodePicture(data->data(), static_cast<int>(data->size()), w, h)) {
+                px.raw = std::shared_ptr<std::uint8_t>(p, [](std::uint8_t* q) { stbi_image_free(q); });
                 px.w = w;
                 px.h = h;
             }

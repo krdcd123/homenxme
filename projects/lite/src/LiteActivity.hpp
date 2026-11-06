@@ -49,6 +49,7 @@ public:
 
     struct Pixels {
         std::vector<std::uint8_t> rgba;
+        std::shared_ptr<std::uint8_t> raw; // or the decoder's own buffer, not copied
         int w = 0, h = 0;
     };
 
