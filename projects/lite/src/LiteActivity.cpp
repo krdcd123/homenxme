@@ -779,6 +779,7 @@ void LiteActivity::pumpDaemon() {
                     m_lockIn = 1.f;
                 }
                 app().setSleeping(true);
+                switchu::FileLog::logCommit("[lite] sleep frames drawn; waiting");
                 break;
             case M::WakeUp:
                 switchu::FileLog::log("[lite] wake up (locked %d)", m_locked ? 1 : 0);

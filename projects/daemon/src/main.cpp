@@ -963,13 +963,17 @@ static void startSleepSequence(const char* source) {
     switchu::FileLog::logCommit("[power] sleep requested source=%s menuActive=%d",
                                 source, daemon::menu_la::isActive() ? 1 : 0);
     pushNotification(smi::MenuMessage::SleepSequence);
+    switchu::FileLog::logCommit("[power] menu told; committing the SD card");
     // Preserve the final state even if the sleep ends in a forced power loss.
-    switchu::commitSdCard("sleep");
+    const bool committed = switchu::commitSdCard("sleep");
+    switchu::FileLog::logCommit("[power] SD card committed ok=%d", committed ? 1 : 0);
     // The handoff is cooperative: give the menu a couple of frames to stop
     // presenting and pause its audio instead of relying on the sleep landing
     // a frame later.
     svcSleepThread(50'000'000ULL);
-    appletStartSleepSequence(true);
+    switchu::FileLog::logCommit("[power] starting the sleep sequence");
+    const Result sleepRc = appletStartSleepSequence(true);
+    switchu::FileLog::logCommit("[power] sleep sequence returned rc=0x%X", sleepRc);
 }
 
 static void startPowerSequence(const char* source, smi::SystemMessage action) {
