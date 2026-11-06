@@ -400,17 +400,17 @@ void LiteActivity::drawPads(nxui::Renderer& r, float a, float rise) {
                 battery(x + 19.f, 15.f, pad.level[1], pad.charging[1]);
                 x += 34.f + 26.f;
                 break;
-            case kJoyLeft:
-                r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
-                r.drawCircle({x + 7.5f, cy - 5.f}, 2.6f, c, 12);
-                battery(x, 15.f, pad.level[0], pad.charging[0]);
-                x += 15.f + 26.f;
+            case kJoyLeft: // a single Joy-Con held sideways: laid on its side
+                r.drawRoundedRectOutline({x, cy - 8.f, 30.f, 16.f}, c, 6.f, w);
+                r.drawCircle({x + 8.f, cy}, 2.6f, c, 12);
+                battery(x + 1.f, 28.f, pad.level[0], pad.charging[0]);
+                x += 30.f + 26.f;
                 break;
             case kJoyRight:
-                r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
-                r.drawCircle({x + 7.5f, cy + 5.f}, 2.6f, c, 12);
-                battery(x, 15.f, pad.level[0], pad.charging[0]);
-                x += 15.f + 26.f;
+                r.drawRoundedRectOutline({x, cy - 8.f, 30.f, 16.f}, c, 6.f, w);
+                r.drawCircle({x + 22.f, cy}, 2.6f, c, 12);
+                battery(x + 1.f, 28.f, pad.level[0], pad.charging[0]);
+                x += 30.f + 26.f;
                 break;
             case kPro: // a Pro Controller: wide, two sticks, grips
                 r.drawRoundedRectOutline({x, cy - 13.f, 46.f, 26.f}, c, 12.f, w);
