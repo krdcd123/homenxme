@@ -219,6 +219,7 @@ private:
     float m_busyUntil = 0.f; // a press, a touch or a movement: every refresh is drawn until then
     bool m_moving = false;   // something is animating
     int m_startStage = 0;
+    bool m_avatarTried = false;
 
     std::vector<Game> m_games, m_homebrew; // the installed titles, the .nro apps (and NRO forwarders)
     std::vector<Game> m_list;              // what shows: the row, or the grid

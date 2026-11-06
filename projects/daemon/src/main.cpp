@@ -1078,6 +1078,15 @@ static void openMenuFromHome(const char* source) {
         forceMenuGone(source);
     }
 
+    // A game that is still starting up can wedge the console if it is pulled
+    // back to HOME mid-load, so HOME waits until it has had time to come up.
+    if (!daemon::menu_la::isActive() && daemon::app::isRunning()
+        && daemon::app::msSinceLaunch() < 6000) {
+        switchu::FileLog::log("[%s] HOME ignored: the game is still loading (%llu ms)", source,
+                              (unsigned long long)daemon::app::msSinceLaunch());
+        return;
+    }
+
     if (!daemon::menu_la::isActive() && !g_foregroundAppletActive && appMayOwnScreen()) {
         if (!takeForegroundFromRunningApp(source)) {
             switchu::FileLog::log("[%s] HOME aborted: foreground request failed", source);

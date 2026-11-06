@@ -1085,8 +1085,14 @@ void LiteActivity::onUpdate(float dt) {
             m_audio.start();
             m_audio.setSounds(m_settings.sounds, m_settings.soundVolume);
             m_audio.setMusic(false, 0); // the stock HOME has no music
-        } else if (m_startStage == 2 && m_time > 2.5f) {
+        } else if (m_startStage == 2 && m_time > 1.6f) {
             m_startStage = 3;
+        }
+    }
+    // The profile picture: a small decode, loaded early so it is not missing when HOME comes back.
+    if (!m_avatarTried && m_time > 0.35f) {
+        m_avatarTried = true;
+        {
             AccountUid uid{};
             uid.uid[0] = m_user.uid[0];
             uid.uid[1] = m_user.uid[1];

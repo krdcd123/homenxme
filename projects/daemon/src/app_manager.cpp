@@ -412,7 +412,13 @@ bool hasForeground() { return session().hasForeground(); }
 std::uint64_t suspendedTitleId() { return session().suspendedTitleId(); }
 SessionSnapshot snapshot() { return session().snapshot(); }
 Event* stateChangedEvent() { return session().stateChangedEvent(); }
+static std::uint64_t g_launchedAtNs = 0;
+std::uint64_t msSinceLaunch() {
+    if (g_launchedAtNs == 0) return ~0ULL;
+    return (armTicksToNs(armGetSystemTick()) - g_launchedAtNs) / 1'000'000ULL;
+}
 Result launch(std::uint64_t titleId, AccountUid uid, bool takeForeground) {
+    g_launchedAtNs = armTicksToNs(armGetSystemTick());
     return session().launch(titleId, uid, takeForeground);
 }
 Result resume() { return session().resume(); }

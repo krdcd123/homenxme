@@ -83,6 +83,8 @@ Result kill();
 Result areLibraryAppletsLeft(bool* out);
 Result requestExitLibraryAppletOrTerminate(std::uint64_t timeoutNs);
 bool checkFinished();
+// Milliseconds since the last launch() (huge if none).
+std::uint64_t msSinceLaunch();
 void onHomeSuspend();
 void cleanup();
 
