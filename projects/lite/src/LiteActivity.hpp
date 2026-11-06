@@ -44,6 +44,7 @@ public:
     void onDestroy() override;
     void onUpdate(float dt) override;
     int frameInterval() const override;
+    void pollBetweenFrames() override { pumpDaemon(); } // (the sleep notice can't wait for the next frame)
     void onRender(nxui::Renderer&) override {}
     nxui::Widget* focusRoot() override { return nullptr; } // it reads the buttons itself
 

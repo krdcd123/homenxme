@@ -42,6 +42,10 @@ public:
     /// second) asks for fewer, and the GPU and CPU rest in between. Any press or touch brings back every refresh.
     virtual int frameInterval() const { return 1; }
 
+    /// Called in the rests between frames (see frameInterval): for what must not wait for the next frame,
+    /// like the daemon's sleep notice (it starts the sleep 50 ms after sending it).
+    virtual void pollBetweenFrames() {}
+
     /// Called each frame. Input has already been updated.
     virtual void onUpdate(float dt) {}
 

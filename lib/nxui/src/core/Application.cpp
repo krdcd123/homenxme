@@ -250,7 +250,9 @@ void Application::run() {
                 const float due = static_cast<float>(every) / 60.f - 0.004f;
                 const float since = static_cast<float>(nowTick - prevTick) / static_cast<float>(armGetSystemTickFreq());
                 if (since < due) {
-                    svcSleepThread(static_cast<int64_t>(std::min(due - since, 0.016f) * 1e9f) + 500'000LL);
+                    m_activity->pollBetweenFrames();
+                    if (m_sleeping) continue; // (the console is going to sleep: the sleeping branch takes over)
+                    svcSleepThread(static_cast<int64_t>(std::min(due - since, 0.010f) * 1e9f) + 500'000LL);
                     continue; // (prevTick stays: the time adds up for the next update)
                 }
             }
