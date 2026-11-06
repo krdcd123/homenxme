@@ -147,6 +147,8 @@ private:
     void closeGallery();
     void showGalleryPage(int page);
     void loadGalleryPicture();
+    void openRealAlbum();   // Nintendo's own Album, to play a video (HOME starts again after it)
+    void setUpRealAlbum(bool on);
     void updateGallery();
     void drawGallery(nxui::Renderer& r);
 

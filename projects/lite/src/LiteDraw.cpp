@@ -17,6 +17,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <sstream>
 
 namespace lite {
 using namespace ui;
@@ -796,6 +798,10 @@ void LiteActivity::updateGallery() {
             loadGalleryPicture();
             m_audio.play("navigation");
         }
+        if (in.isDown(B::Y) || (in.isDown(B::A) && m_galAll && m_galAt < n && isVideoFile((*m_galAll)[(std::size_t)m_galAt]))) {
+            openRealAlbum();
+            return;
+        }
         if (in.isDown(B::B) || in.isDown(B::A)) {
             m_galView = false;
             m_audio.play("hide_modal");
@@ -815,6 +821,10 @@ void LiteActivity::updateGallery() {
     }
     if (in.isDown(B::L) || in.isDown(B::ZL)) showGalleryPage(m_galPage - 1);
     if (in.isDown(B::R) || in.isDown(B::ZR)) showGalleryPage(m_galPage + 1);
+    if (in.isDown(B::Y)) {
+        openRealAlbum();
+        return;
+    }
     if (in.isDown(B::B)) {
         closeGallery();
         m_audio.play("hide_modal");
@@ -825,11 +835,14 @@ void LiteActivity::updateGallery() {
         m_galAt = 0;
         for (std::size_t i = 0; m_galAll && i < m_galAll->size(); ++i)
             if ((*m_galAll)[i] == file) m_galAt = static_cast<int>(i);
+        if (isVideoFile(file)) { // HOME has no video decoder: the real Album plays it
+            openRealAlbum();
+            return;
+        }
         m_galView = true;
         m_galBig.reset();
         loadGalleryPicture();
         m_audio.play("activation");
-        if (isVideoFile(file)) say("Videos can't be played in HOME: play them from a media app.");
     }
 }
 
@@ -869,7 +882,7 @@ void LiteActivity::drawGallery(nxui::Renderer& r) {
         r.drawGradientRect({0.f, 620.f, 1280.f, 100.f}, nxui::Color(0.f, 0.f, 0.f, 0.f), nxui::Color(0.f, 0.f, 0.f, 0.7f));
         const int n = m_galAll ? static_cast<int>(m_galAll->size()) : 0;
         textMid(r, m_fBody, std::to_string(m_galAt + 1) + " of " + std::to_string(n), 40.f, 684.f, kMuted);
-        const std::string hint = "Left / Right more    B Back";
+        const std::string hint = "Left / Right more    A / Y Play    B Back";
         textMid(r, m_fBody, hint, 1240.f - measured(m_fBody, hint).x, 684.f, kWhite.withAlpha(0.9f));
         return;
     }
@@ -884,7 +897,7 @@ void LiteActivity::drawGallery(nxui::Renderer& r) {
     const std::string info = std::to_string(shots) + " captures, page " + std::to_string(std::max(0, m_galPage) + 1) + " of "
                            + std::to_string(std::max(1, (shots + kGalleryPage - 1) / kGalleryPage));
     textMid(r, m_fBody, info, kGalCard.x + 160.f, kGalCard.y + 48.f + dy, kMuted.withAlpha(a));
-    const std::string hint = "A View    L R More    B Back";
+    const std::string hint = "A View / Play    Y Real Album    L R More    B Back";
     textMid(r, m_fBody, hint, kGalCard.x + kGalCard.width - 40.f - measured(m_fBody, hint).x, kGalCard.y + 48.f + dy, kMuted.withAlpha(0.8f * a));
     if (m_galJob.valid()) {
         const std::string looking = "Opening your captures...";
@@ -909,6 +922,122 @@ void LiteActivity::drawGallery(nxui::Renderer& r) {
         textMid(r, m_fBody, m_galTiles[(std::size_t)i].label, tile.x + 10.f, tile.y + tile.height - 13.f, kWhite.withAlpha(ta), 0.8f);
         r.drawRoundedRectOutline(tile, chosen ? accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * ta) : nxui::Color(1.f, 1.f, 1.f, 0.12f * ta), 14.f, chosen ? 3.f : 1.f);
     }
+}
+
+
+// ---------------------------------------------------------------- videos: Nintendo's own Album
+//
+// HOME has no video decoder, so a video plays in the real Album, which the daemon opens (and starts HOME again
+// when it is closed). Atmosphere starts the homebrew loader in place of the Album, though, unless
+// override_config.ini says otherwise: the same test as the daemon's.
+namespace {
+constexpr const char* kOverrideIni = "sdmc:/atmosphere/config/override_config.ini";
+constexpr const char* kOverrideBackup = "sdmc:/atmosphere/config/override_config.ini.litenx-backup";
+constexpr const char* kUnusedProgram = "0100000000001fff"; // a program nobody starts: the loader has nothing to put in its place
+
+std::string squash(const std::string& line) {
+    std::string s;
+    for (char c : line)
+        if (!std::isspace(static_cast<unsigned char>(c))) s += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+bool isAlbumProgram(const std::string& v) { return v == "010000000000100d" || v == "0x010000000000100d"; }
+
+bool albumOpensHomebrew() {
+    std::ifstream f(kOverrideIni);
+    if (!f) return true; // Atmosphere's default
+    std::map<std::string, std::string> programs;
+    bool inHbl = false;
+    std::string line;
+    while (std::getline(f, line)) {
+        const std::string s = squash(line);
+        if (s.empty() || s[0] == ';' || s[0] == '#') continue;
+        if (s[0] == '[') {
+            inHbl = s == "[hbl_config]";
+            continue;
+        }
+        const auto eq = s.find('=');
+        if (!inHbl || eq == std::string::npos) continue;
+        const std::string k = s.substr(0, eq), v = s.substr(eq + 1);
+        for (const char* base : {"program_id", "title_id"})
+            if (k.rfind(base, 0) == 0) programs[k.substr(std::strlen(base))] = v;
+    }
+    if (programs.empty()) return true;
+    for (const auto& kv : programs)
+        if (isAlbumProgram(kv.second)) return true; // (with or without a key: the Album stays out of reach of a button press)
+    return false;
+}
+} // namespace
+
+void LiteActivity::setUpRealAlbum(bool on) {
+    std::error_code ec;
+    if (!on) { // the file as it was
+        if (!std::filesystem::exists(kOverrideBackup, ec)) {
+            say("There's nothing to put back.");
+            return;
+        }
+        std::filesystem::copy_file(kOverrideBackup, kOverrideIni, std::filesystem::copy_options::overwrite_existing, ec);
+        if (!ec) std::filesystem::remove(kOverrideBackup, ec);
+        say(ec ? "Couldn't put override_config.ini back." : "override_config.ini is back as it was: restart the console.");
+        return;
+    }
+    std::vector<std::string> lines;
+    const bool existed = std::filesystem::exists(kOverrideIni, ec);
+    if (existed) {
+        std::ifstream in(kOverrideIni);
+        std::string line;
+        while (std::getline(in, line)) lines.push_back(line);
+        if (!std::filesystem::exists(kOverrideBackup, ec)) // (the first file is the one kept)
+            std::filesystem::copy_file(kOverrideIni, kOverrideBackup, ec);
+    }
+    bool inHbl = false, changed = false, sawHbl = false;
+    std::size_t hblEnd = lines.size();
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string s = squash(lines[i]);
+        if (s.empty() || s[0] == ';' || s[0] == '#') continue;
+        if (s[0] == '[') {
+            if (inHbl) hblEnd = i;
+            inHbl = s == "[hbl_config]";
+            sawHbl = sawHbl || inHbl;
+            continue;
+        }
+        const auto eq = s.find('=');
+        if (!inHbl || eq == std::string::npos) continue;
+        const std::string k = s.substr(0, eq);
+        if ((k.rfind("program_id", 0) == 0 || k.rfind("title_id", 0) == 0) && isAlbumProgram(s.substr(eq + 1))) {
+            lines[i] = lines[i].substr(0, lines[i].find('=') + 1) + kUnusedProgram;
+            changed = true;
+        }
+    }
+    if (!changed) { // nothing names the Album yet: the default entry is replaced by one for another program
+        if (!sawHbl) {
+            lines.push_back("[hbl_config]");
+            hblEnd = lines.size();
+        }
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(std::min(hblEnd, lines.size())),
+                     std::string("program_id_0=") + kUnusedProgram);
+    }
+    std::ofstream out(kOverrideIni, std::ios::trunc);
+    for (const std::string& l : lines) out << l << "\n";
+    out.close();
+    say(out ? "Done: restart the console once, then videos play in the Album."
+            : "Couldn't write override_config.ini on the SD card.");
+}
+
+void LiteActivity::openRealAlbum() {
+    if (m_galOpen) closeGallery(); // (the album's picture goes away first; its popup or the launch follows)
+    if (albumOpensHomebrew()) {
+        std::vector<Item> items;
+        items.push_back({"Let the Album play videos", [this]() { setUpRealAlbum(true); }, nullptr, nullptr, false, false});
+        std::error_code ec;
+        if (std::filesystem::exists(kOverrideBackup, ec))
+            items.push_back({"Put override_config.ini back", [this]() { setUpRealAlbum(false); }, nullptr, nullptr, false, false});
+        items.push_back({"Not now", []() {}, nullptr, nullptr, false, false});
+        openMenu("Atmosphere opens Homebrew in place of the Album", std::move(items));
+        return;
+    }
+    leave(-1, 0.3f, [this]() { m_launcher.launchAlbum(); }); // the daemon opens it and starts HOME again
 }
 
 // ---------------------------------------------------------------- the lock screen
