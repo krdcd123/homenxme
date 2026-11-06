@@ -312,18 +312,8 @@ void LiteActivity::drawCard(nxui::Renderer& r, const nxui::Rect& card, const Gam
 
 // ---------------------------------------------------------------- header, dock, footer
 
-void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
-    if (a <= 0.001f) return;
-    // Header: you on the left; the time, Wi-Fi, flight mode and the battery on the right.
-    const float face = 52.f;
-    const nxui::Rect fr{kAvatar.x, kAvatar.y - 14.f * (1.f - a), face, face};
-    if (m_avatar && m_avatar->valid()) r.drawTextureRounded(m_avatar.get(), fr, face * 0.5f, kWhite.withAlpha(a));
-    else r.drawCircle({fr.x + face * 0.5f, fr.y + face * 0.5f}, face * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.3f * a), 32);
-    r.drawRoundedRectOutline(fr, kWhite.withAlpha(0.8f * a), face * 0.5f, 2.f);
-    if (m_zone == Zone::Top)
-        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a),
-                                 face * 0.5f + 5.f, 3.f);
-    const float hy = fr.y + face * 0.5f;
+// Battery, Wi-Fi (or flight mode) and, on HOME, the time: the same on HOME and on the lock screen.
+void LiteActivity::drawStatus(nxui::Renderer& r, float a, float hy, bool withClock) {
     float x = 1236.f - measured(m_fPill, m_battery).x;
     textMid(r, m_fPill, m_battery, x, hy, kWhite.withAlpha(a));
     const int charge = m_battery.empty() ? -1 : std::atoi(m_battery.c_str());
@@ -336,8 +326,24 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
         icon(r, "wifi", x + 13.f, hy, 26.f, kWhite.withAlpha((m_online ? 1.f : 0.4f) * a));
         if (!m_online) r.drawLine({x + 2.f, hy + 11.f}, {x + 24.f, hy - 11.f}, kWhite.withAlpha(0.7f * a), 2.5f);
     }
+    if (!withClock) return;
     x -= 22.f + measured(m_fPill, m_clock).x;
     textMid(r, m_fPill, m_clock, x, hy, kWhite.withAlpha(a));
+}
+
+void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
+    if (a <= 0.001f) return;
+    // Header: you on the left; the time, Wi-Fi, flight mode and the battery on the right.
+    const float face = 52.f;
+    const nxui::Rect fr{kAvatar.x, kAvatar.y - 14.f * (1.f - a), face, face};
+    if (m_avatar && m_avatar->valid()) r.drawTextureRounded(m_avatar.get(), fr, face * 0.5f, kWhite.withAlpha(a));
+    else r.drawCircle({fr.x + face * 0.5f, fr.y + face * 0.5f}, face * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.3f * a), 32);
+    r.drawRoundedRectOutline(fr, kWhite.withAlpha(0.8f * a), face * 0.5f, 2.f);
+    if (m_zone == Zone::Top)
+        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a),
+                                 face * 0.5f + 5.f, 3.f);
+    const float hy = fr.y + face * 0.5f;
+    drawStatus(r, a, hy, true);
 
     // The chosen one's name, in blue above its icon, and its play time in a frosted box under it
     if (const Game* g = current()) {
@@ -1224,13 +1230,7 @@ void LiteActivity::drawLock(nxui::Renderer& r) {
             textMid(r, m_fBody, nm, 640.f - measured(m_fBody, nm).x * 0.425f, cy + 56.f, kMuted.withAlpha(a), 0.85f);
         }
     }
-    // The battery, top right; a bolt while charging.
-    const int charge = m_battery.empty() ? -1 : std::atoi(m_battery.c_str());
-    switchu::battery_drawing::drawBattery(r, {1114.f, 32.f + lift, 42.f, 22.f}, charge, m_charging, a);
-    const float bx = 1280.f - 48.f - measured(m_fPill, m_battery).x;
-    textMid(r, m_fPill, m_battery, bx, 44.f + lift, kWhite.withAlpha(0.9f * a));
-    if (m_charging)
-        switchu::battery_drawing::drawLightningBolt(r, {bx - 26.f, 33.f + lift, 22.f, 22.f}, kGreen.withAlpha(a), nxui::Color(0.f, 0.f, 0.f, 0.f), 0.f);
+    drawStatus(r, a, 54.f + lift, false); // (the same icons as HOME's, in the same place)
     if (m_pwSet || m_pwSetup) { // the password's dots (arrows while making it)
         const std::string prompt = m_pw.prompt();
         textMid(r, m_fLabel, prompt, 640.f - measured(m_fLabel, prompt).x * 0.5f, 440.f + lift, (m_pw.wrong > 0.f ? kRed : kWhite).withAlpha(a));

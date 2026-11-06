@@ -169,6 +169,7 @@ private:
     void drawCards(nxui::Renderer& r);
     void drawCard(nxui::Renderer& r, const nxui::Rect& card, const Game& g, float t, float alpha, bool focusedRow);
     void drawChrome(nxui::Renderer& r, float a);
+    void drawStatus(nxui::Renderer& r, float a, float hy, bool withClock);
     void drawLaunch(nxui::Renderer& r);
     void drawReturn(nxui::Renderer& r);
     void drawHints(nxui::Renderer& r, float right, float cy, std::initializer_list<std::pair<const char*, const char*>> hints, float a);
