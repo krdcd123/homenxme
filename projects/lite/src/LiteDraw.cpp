@@ -1,3 +1,4 @@
+#ifdef SWITCHU_MENU // (the HOME build only: the standalone .nro has no daemon to talk to)
 // LiteNX: everything that is drawn, the popups, the album, the lock screen and touch.
 #include "LiteActivity.hpp"
 
@@ -1326,3 +1327,5 @@ bool LiteActivity::handleTouch() {
 }
 
 } // namespace lite
+
+#endif // SWITCHU_MENU

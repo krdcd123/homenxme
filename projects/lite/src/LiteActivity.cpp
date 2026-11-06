@@ -1,3 +1,4 @@
+#ifdef SWITCHU_MENU // (the HOME build only: the standalone .nro has no daemon to talk to)
 // LiteNX: the lists, icons, status, starting things and the daemon (the drawing is in LiteDraw.cpp).
 #include "LiteActivity.hpp"
 
@@ -1230,3 +1231,5 @@ void LiteActivity::onUpdate(float dt) {
 }
 
 } // namespace lite
+
+#endif // SWITCHU_MENU
