@@ -101,6 +101,13 @@ bool stockStyle() {
     return line.rfind("cards-stock", 0) == 0;
 }
 
+bool liteStyle() {
+    std::string line;
+    std::ifstream in(kHomeStyle);
+    std::getline(in, line);
+    return line.rfind("cards-lite", 0) == 0;
+}
+
 } // namespace
 
 ManagerActivity::ButtonView ManagerActivity::createButton(
@@ -234,6 +241,7 @@ bool ManagerActivity::onCreate() {
     });
     m_cardsStyle = cardsStyle();
     m_stockStyle = stockStyle();
+    m_liteStyle = liteStyle();
     m_styleButton = createButton({676.f, 540.f, 500.f, 58.f}, "", [this]() {
         requestHomeStyle();
     });
@@ -437,8 +445,9 @@ void ManagerActivity::refreshPresentation() {
                      !m_loading && !updaterBusy);
     // One button steps through the three looks: HomeNX -> CardsNX -> Stock -> HomeNX.
     const std::string styleText = !m_cardsStyle ? tr("manager.use_cards", "Use CardsNX as HOME")
+                                : m_liteStyle ? tr("manager.use_homenx", "Use HomeNX's HOME")
                                 : !m_stockStyle ? tr("manager.use_stock", "Use the Stock look as HOME")
-                                                : tr("manager.use_homenx", "Use HomeNX's HOME");
+                                                : tr("manager.use_lite", "Use LiteNX as HOME");
     m_styleButton.label->setText(styleText);
     m_styleButton.button->setAccessibilityLabel(styleText);
     setButtonVisible(m_styleButton, !m_restartRequired, !m_loading && !updaterBusy);
@@ -663,18 +672,21 @@ void ManagerActivity::requestToggle() {
 void ManagerActivity::requestHomeStyle() {
     if (m_loading || m_restartRequired)
         return;
-    // 0 = HomeNX, 1 = CardsNX, 2 = Stock look (CardsNX with the stock-Switch layout)
-    const int now = !m_cardsStyle ? 0 : m_stockStyle ? 2 : 1;
-    const int to = (now + 1) % 3;
-    static const char* const kLine[] = {"homenx", "cards", "cards-stock"};
+    // 0 = HomeNX, 1 = CardsNX, 2 = Stock look (CardsNX with the stock-Switch layout), 3 = LiteNX
+    const int now = !m_cardsStyle ? 0 : m_liteStyle ? 3 : m_stockStyle ? 2 : 1;
+    const int to = (now + 1) % 4;
+    static const char* const kLine[] = {"homenx", "cards", "cards-stock", "cards-lite"};
     const std::string title = to == 0 ? tr("manager.homenx_title", "Use HomeNX's HOME?")
                             : to == 1 ? tr("manager.cards_title", "Use CardsNX as HOME?")
+                            : to == 3 ? tr("manager.lite_title", "Use LiteNX as HOME?")
                                       : tr("manager.stock_title", "Use the Stock look as HOME?");
     const std::string message = to == 0 ? tr("manager.homenx_message", "HOME goes back to HomeNX's folders and sidebar. It changes after a restart.")
                               : to == 1 ? tr("manager.cards_message", "HOME becomes CardsNX's row of game cards, with Discord, News and updates. It changes after a restart.")
+                              : to == 3 ? tr("manager.lite_message", "HOME becomes LiteNX: the stock Switch layout with an animated background and frosted glass, and nothing else running. It changes after a restart.")
                                         : tr("manager.stock_message", "HOME becomes CardsNX with the stock Switch layout: rounded icons, a frosted dock and a footer. It changes after a restart.");
     const std::string go = to == 0 ? tr("manager.use_homenx", "Use HomeNX's HOME")
                          : to == 1 ? tr("manager.use_cards", "Use CardsNX as HOME")
+                         : to == 3 ? tr("manager.use_lite", "Use LiteNX as HOME")
                                    : tr("manager.use_stock", "Use the Stock look as HOME");
     m_dialog->show(title, message,
         {
@@ -686,7 +698,7 @@ void ManagerActivity::requestHomeStyle() {
                      std::ofstream out(kHomeStyle, std::ios::trunc);
                      out << kLine[to] << '\n';
                  }
-                 if (cardsStyle() != (to != 0) || stockStyle() != (to == 2)) {
+                 if (cardsStyle() != (to != 0) || stockStyle() != (to == 2) || liteStyle() != (to == 3)) {
                      m_errorMessage = tr("manager.style_failed", "The choice couldn't be saved on the SD card.");
                      refreshPresentation();
                      return;
@@ -694,6 +706,7 @@ void ManagerActivity::requestHomeStyle() {
                  switchu::FileLog::log("[style] home screen -> %s", kLine[to]);
                  m_cardsStyle = to != 0;
                  m_stockStyle = to == 2;
+                 m_liteStyle = to == 3;
                  m_styleChanged = true;
                  m_restartRequired = true;
                  refreshPresentation();
@@ -907,26 +920,27 @@ void ManagerActivity::drawDecor(nxui::Renderer& r) {
     // Home screen: which look HOME has, the two side by side as little cards.
     r.drawText(tr("manager.home_screen", "Home screen"), {676.f, 418.f}, &m_bodyFont, text, 1.f);
     struct Look { const char* name; bool cards; float x; };
-    const Look looks[] = {{"HomeNX", false, 676.f}, {"CardsNX", true, 878.f}, {"Stock", true, 1080.f}};
+    const Look looks[] = {{"HomeNX", false, 676.f}, {"CardsNX", true, 826.f}, {"Stock", true, 976.f}, {"LiteNX", true, 1126.f}};
     for (const Look& l : looks) {
         const bool stock = std::strcmp(l.name, "Stock") == 0;
-        const bool now = l.cards == m_cardsStyle && (!l.cards || stock == m_stockStyle);
-        const nxui::Rect box{l.x, 456.f, 190.f, 70.f};
+        const bool lite = std::strcmp(l.name, "LiteNX") == 0;
+        const bool now = l.cards == m_cardsStyle && (!l.cards || (lite ? m_liteStyle : (stock == m_stockStyle && !m_liteStyle)));
+        const nxui::Rect box{l.x, 456.f, 140.f, 70.f};
         r.drawRoundedRect(box, text.withAlpha(now ? 0.10f : 0.04f), 16.f);
         r.drawRoundedRectOutline(box, now ? nxui::Color(0.30f, 0.62f, 1.f, 1.f) : m_theme.panelBorder.withAlpha(0.5f), 16.f,
                                  now ? 2.5f : 1.2f);
         if (l.cards) { // three little cards
             for (int i = 0; i < 3; ++i)
-                r.drawRoundedRect({box.x + 14.f + i * 18.f, box.y + 14.f, 14.f, 42.f},
+                r.drawRoundedRect({box.x + 10.f + i * 14.f, box.y + 14.f, 11.f, 42.f},
                                   nxui::Color(0.95f, 0.55f + 0.15f * i, 0.4f + 0.2f * i, 0.9f), 4.f);
         } else { // a grid of icons
             for (int i = 0; i < 6; ++i)
-                r.drawRoundedRect({box.x + 14.f + (i % 3) * 18.f, box.y + 16.f + (i / 3) * 20.f, 14.f, 14.f},
+                r.drawRoundedRect({box.x + 10.f + (i % 3) * 14.f, box.y + 16.f + (i / 3) * 20.f, 11.f, 11.f},
                                   nxui::Color(0.3f, 0.62f, 1.f, 0.85f), 4.f);
         }
-        r.drawText(l.name, {box.x + 72.f, box.y + 12.f}, &m_smallFont, text, 0.9f);
-        r.drawText(now ? tr("manager.style_now", "Now") : tr("manager.style_other", "After a restart"),
-                   {box.x + 72.f, box.y + 40.f}, &m_smallFont, muted, 0.7f);
+        r.drawText(l.name, {box.x + 56.f, box.y + 12.f}, &m_smallFont, text, 0.8f);
+        r.drawText(now ? tr("manager.style_now", "Now") : tr("manager.style_other", "After restart"),
+                   {box.x + 56.f, box.y + 40.f}, &m_smallFont, muted, 0.65f);
     }
 }
 

@@ -8,6 +8,7 @@
 #include <fmt/format.h>
 #ifdef SWITCHU_MENU
 #include "CardsActivity.hpp"
+#include "LiteActivity.hpp"
 #include <nxui/core/Renderer.hpp>
 #include <switchu/smi_protocol.hpp>
 #include <switchu/file_log.hpp>
@@ -347,7 +348,10 @@ int main(int argc, char* argv[]) {
         // NXToggle's Home screen choice: CardsNX's card row instead of HomeNX's.
         std::string homeStyle;
         std::getline(std::ifstream("sdmc:/config/SwitchU/frontend.txt"), homeStyle);
-        if (homeStyle.rfind("cards", 0) == 0)
+        if (homeStyle.rfind("cards-lite", 0) == 0)
+            app.setActivity(std::make_unique<lite::LiteActivity>(sysStatus.suspended_app_id, sysStatus.app_running,
+                startMode == switchu::smi::MenuStartMode::StartupBoot));
+        else if (homeStyle.rfind("cards", 0) == 0)
             app.setActivity(std::make_unique<cards::CardsActivity>(sysStatus.suspended_app_id, sysStatus.app_running,
                 startMode == switchu::smi::MenuStartMode::StartupBoot));
         else if (startupConfig.tutorialCompleted)

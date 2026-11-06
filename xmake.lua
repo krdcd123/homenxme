@@ -191,6 +191,9 @@ target("SwitchU")
               "projects/cards/src/Mtp.cpp", "projects/cards/src/Spotify.cpp")
     add_files("projects/updater/src/Catalog.cpp") -- homebrew updates, as the Homebrew Manager finds them
     add_includedirs("projects/cards/src", {public = false})
+    -- LiteNX as HOME (NXToggle > Home screen): the light stock-layout screen, built in.
+    add_files("projects/lite/src/*.cpp")
+    add_includedirs("projects/lite/src", {public = false})
     add_defines("HOMENX_UPDATER_SHARED_NETWORK", homenx_build_define)
     add_links("minizip")
     add_packages("nlohmann_json", "fmt", "libsdl", "libsdl_mixer", "libsdl_ttf", "zlib", "libwebp", "libcurl", "curlpp")

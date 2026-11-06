@@ -82,6 +82,7 @@ private:
     ButtonView m_toggleButton;
     ButtonView m_updateButton;
     ButtonView m_styleButton;   // Home screen: HomeNX or CardsNX
+    bool m_liteStyle = false; // frontend.txt says cards-lite
     bool m_stockStyle = false; // frontend.txt says cards-stock
     bool m_cardsStyle = false;  // what sdmc:/config/SwitchU/frontend.txt says
     bool m_styleChanged = false;
