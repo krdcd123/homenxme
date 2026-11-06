@@ -959,13 +959,35 @@ static void requestPowerStateChange(const char* source, bool reboot) {
 // does need a handoff before the console stops responding. Left on its own it
 // keeps submitting frames, playing music and running its per-frame work for the
 // whole sleep, which is what flattened the battery in sleep mode.
+static u64 g_sleepReturnedAt = 0;   // armTicksToNs when the last sleep call returned
+static u64 g_lastCommitAt = 0;
+static u64 nowNs() { return armTicksToNs(armGetSystemTick()); }
+
 static void startSleepSequence(const char* source) {
+    // Hammering the power button queues several sleep requests back to back.
+    // Starting a new sleep while the console is still finishing the previous
+    // wake is what appears to leave the system wedged, so let each wake settle.
+    constexpr u64 kSettleNs = 1'200'000'000ULL;
+    if (g_sleepReturnedAt != 0) {
+        const u64 since = nowNs() - g_sleepReturnedAt;
+        if (since < kSettleNs) {
+            switchu::FileLog::logCommit("[power] sleep too soon after wake (%llu ms); settling",
+                                        (unsigned long long)(since / 1'000'000ULL));
+            svcSleepThread(static_cast<s64>(kSettleNs - since));
+        }
+    }
     switchu::FileLog::logCommit("[power] sleep requested source=%s menuActive=%d",
                                 source, daemon::menu_la::isActive() ? 1 : 0);
     pushNotification(smi::MenuMessage::SleepSequence);
     switchu::FileLog::logCommit("[power] menu told; committing the SD card");
     // Preserve the final state even if the sleep ends in a forced power loss.
-    const bool committed = switchu::commitSdCard("sleep");
+    // Skip the commit when one just happened: back-to-back commits on a slow
+    // card are the longest stall in this path.
+    bool committed = true;
+    if (g_lastCommitAt == 0 || nowNs() - g_lastCommitAt > 3'000'000'000ULL) {
+        committed = switchu::commitSdCard("sleep");
+        g_lastCommitAt = nowNs();
+    }
     switchu::FileLog::logCommit("[power] SD card committed ok=%d", committed ? 1 : 0);
     // The handoff is cooperative: give the menu a couple of frames to stop
     // presenting and pause its audio instead of relying on the sleep landing
@@ -973,6 +995,7 @@ static void startSleepSequence(const char* source) {
     svcSleepThread(50'000'000ULL);
     switchu::FileLog::logCommit("[power] starting the sleep sequence");
     const Result sleepRc = appletStartSleepSequence(true);
+    g_sleepReturnedAt = nowNs();
     switchu::FileLog::logCommit("[power] sleep sequence returned rc=0x%X", sleepRc);
 }
 
@@ -1230,6 +1253,12 @@ static bool handleAppletMessages() {
         // but must reacquire the foreground after wake. Keep our session state
         // in sync so the Wakeup path is allowed to call app::resume().
         daemon::app::onHomeSuspend();
+        // A stale duplicate from rapid power presses lands the instant the
+        // previous sleep returns; sleeping again for it is a spurious cycle.
+        if (g_sleepReturnedAt != 0 && nowNs() - g_sleepReturnedAt < 300'000'000ULL) {
+            switchu::FileLog::logCommit("[power] duplicate sleep message ignored");
+            break;
+        }
         // The console is going under on its own (idle plan or power button):
         // the menu needs the same handoff as a menu-initiated sleep.
         startSleepSequence("applet-sleep");

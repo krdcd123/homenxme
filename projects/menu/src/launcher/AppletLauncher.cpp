@@ -126,6 +126,11 @@ void AppletLauncher::launchUserCreator() {
 }
 
 void AppletLauncher::enterSleep() {
+    // Repeated presses must not stack sleep requests: one per 2 s at most.
+    static u64 lastAt = 0;
+    const u64 now = armTicksToNs(armGetSystemTick());
+    if (lastAt != 0 && now - lastAt < 2'000'000'000ULL) return;
+    lastAt = now;
     if (!preparePowerAction()) return;
     DebugLog::log("[launcher] requesting sleep");
     switchu::menu::smi_cmd::enterSleep();
