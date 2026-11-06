@@ -1053,6 +1053,10 @@ void LiteActivity::onUpdate(float dt) {
     pumpDaemon();
     if (m_asleep) return;
     m_running = runningId(); // (read once a frame: the cards that say Resume)
+    if ((m_padsIn -= dt) <= 0.f) {
+        m_padsIn = 0.5f;
+        readPads();
+    }
     if (m_buzzFor > 0.f && (m_buzzFor -= dt) <= 0.f) { // the buzz ends
         HidVibrationValue off{};
         off.freq_low = 160.f;
@@ -1378,6 +1382,26 @@ void LiteActivity::watchdog() {
             switchu::FileLog::logCommit("[lite] the screen's thread has been in \"%s\" for over 1.5 s", nxui::g_phase.load());
         }
     }
+}
+
+// Which controllers are connected (read from the shared memory: no service call), twice a second.
+void LiteActivity::readPads() {
+    std::vector<int> now;
+    static const HidNpadIdType kIds[] = {HidNpadIdType_Handheld, HidNpadIdType_No1, HidNpadIdType_No2, HidNpadIdType_No3,
+                                         HidNpadIdType_No4,      HidNpadIdType_No5, HidNpadIdType_No6, HidNpadIdType_No7,
+                                         HidNpadIdType_No8};
+    for (const HidNpadIdType id : kIds) {
+        const u32 s = hidGetNpadStyleSet(id);
+        if (!s) continue;
+        if (s & HidNpadStyleTag_NpadHandheld) now.push_back(kHandheld);
+        else if (s & HidNpadStyleTag_NpadJoyDual) now.push_back(kJoyDual);
+        else if (s & HidNpadStyleTag_NpadFullKey) now.push_back(kPro);
+        else if (s & HidNpadStyleTag_NpadJoyLeft) now.push_back(kJoyLeft);
+        else if (s & HidNpadStyleTag_NpadJoyRight) now.push_back(kJoyRight);
+        else now.push_back(kOtherPad);
+    }
+    if (now.size() > 4) now.resize(4);
+    m_pads = std::move(now);
 }
 
 } // namespace lite

@@ -177,6 +177,8 @@ private:
     void drawCard(nxui::Renderer& r, const nxui::Rect& card, const Game& g, float t, float alpha, bool focusedRow);
     void drawChrome(nxui::Renderer& r, float a);
     void drawStatus(nxui::Renderer& r, float a, float hy, bool withClock);
+    void drawPads(nxui::Renderer& r, float a, float rise); // the connected controllers, bottom left
+    void readPads();
     void drawLaunch(nxui::Renderer& r);
     void drawReturn(nxui::Renderer& r);
     void drawHints(nxui::Renderer& r, float right, float cy, std::initializer_list<std::pair<const char*, const char*>> hints, float a);
@@ -206,6 +208,9 @@ private:
     int m_vibCount = 0;
     bool m_vibTried = false;
     float m_buzzFor = 0.f;
+    enum PadKind { kHandheld, kJoyDual, kJoyLeft, kJoyRight, kPro, kOtherPad };
+    std::vector<int> m_pads; // the kinds of controller connected, in player order
+    float m_padsIn = 0.f;
     float m_busyUntil = 0.f; // a press, a touch or a movement: every refresh is drawn until then
     bool m_moving = false;   // something is animating
     int m_startStage = 0;

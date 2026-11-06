@@ -362,6 +362,57 @@ void LiteActivity::drawStatus(nxui::Renderer& r, float a, float hy, bool withClo
     textMid(r, m_fPill, m_clock, x, hy, kWhite.withAlpha(a));
 }
 
+// The connected controllers, small and white, bottom left in line with the dock: the console itself in handheld mode,
+// two Joy-Con, one Joy-Con, a Pro Controller.
+void LiteActivity::drawPads(nxui::Renderer& r, float a, float rise) {
+    float x = 54.f;
+    const float cy = dockY() + rise;
+    const nxui::Color c = kWhite.withAlpha(0.92f * a);
+    const float w = 2.2f;
+    for (const int kind : m_pads) {
+        switch (kind) {
+            case kHandheld: { // the console: a screen between the two Joy-Con
+                r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
+                r.drawRoundedRectOutline({x + 17.f, cy - 12.f, 36.f, 24.f}, c, 4.f, w);
+                r.drawRoundedRectOutline({x + 55.f, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
+                r.drawCircle({x + 7.5f, cy - 5.f}, 2.6f, c, 12);
+                r.drawCircle({x + 62.5f, cy + 5.f}, 2.6f, c, 12);
+                x += 70.f + 26.f;
+                break;
+            }
+            case kJoyDual: // two Joy-Con side by side
+                r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
+                r.drawRoundedRectOutline({x + 19.f, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
+                r.drawCircle({x + 7.5f, cy - 5.f}, 2.6f, c, 12);
+                r.drawCircle({x + 26.5f, cy + 5.f}, 2.6f, c, 12);
+                x += 34.f + 26.f;
+                break;
+            case kJoyLeft:
+                r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
+                r.drawCircle({x + 7.5f, cy - 5.f}, 2.6f, c, 12);
+                x += 15.f + 26.f;
+                break;
+            case kJoyRight:
+                r.drawRoundedRectOutline({x, cy - 14.f, 15.f, 28.f}, c, 6.f, w);
+                r.drawCircle({x + 7.5f, cy + 5.f}, 2.6f, c, 12);
+                x += 15.f + 26.f;
+                break;
+            case kPro: // a Pro Controller: wide, two sticks, grips
+                r.drawRoundedRectOutline({x, cy - 13.f, 46.f, 26.f}, c, 12.f, w);
+                r.drawCircle({x + 13.f, cy - 3.f}, 3.4f, c, 12);
+                r.drawCircle({x + 31.f, cy + 4.f}, 3.4f, c, 12);
+                x += 46.f + 26.f;
+                break;
+            default: // anything else
+                r.drawRoundedRectOutline({x, cy - 11.f, 38.f, 22.f}, c, 10.f, w);
+                r.drawCircle({x + 12.f, cy}, 3.f, c, 12);
+                r.drawCircle({x + 26.f, cy}, 3.f, c, 12);
+                x += 38.f + 26.f;
+                break;
+        }
+    }
+}
+
 void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
     if (a <= 0.001f) return;
     // Header: you on the left; the time, Wi-Fi, flight mode and the battery on the right.
@@ -430,6 +481,7 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
             default: icon(r, "power", cx, cy, 34.f * k, c); break;
         }
     }
+    drawPads(r, a, rise);
     // What the chosen dock button opens, in a small frosted label above it
     if (dock && a >= 0.999f) {
         static const char* const kLabel[] = {"Sphaira", "Album", "Controllers", "Settings", "Power"};
