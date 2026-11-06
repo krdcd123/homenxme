@@ -540,7 +540,14 @@ private:
     // Stock look ("cards-stock"): rounded square icons, a frosted pill dock, header and footer like the Switch's own HOME.
     bool m_stock = false;
     int m_dockSel = 0;
-    std::vector<std::unique_ptr<nxui::Texture>> m_animFrames; // sdmc:/config/CardsNX/animbg/*.jpg, played as the background
+    // sdmc:/config/CardsNX/animbg/*.jpg, played as the background. The files stay in RAM as JPEGs; one frame at a time
+    // is decoded on a thread and uploaded (HOME's picture budget is 64 MB: 40 decoded frames would take all of it,
+    // and then text and icons stop being drawn). Two frames' worth of GPU memory, the next one ready a frame ahead.
+    std::vector<std::vector<std::uint8_t>> m_animJpegs;
+    std::unique_ptr<nxui::Texture> m_animTex, m_animNextTex;
+    int m_animTexIdx = -1, m_animNextIdx = -1, m_animJobIdx = -1;
+    std::future<Pixels> m_animJob;
+    std::size_t m_animBlurStep = 1;
     std::vector<std::string> m_animPaths;
     float m_animFps = 10.f;
     bool m_animTried = false;

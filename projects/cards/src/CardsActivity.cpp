@@ -8093,7 +8093,7 @@ void CardsActivity::draw(nxui::Renderer& r) {
         }
         if (!needBlur) {
             m_blurAge = 1000; // made at once when something needs it
-        } else if (moving || ++m_blurAge >= (m_settings.bgMotion || (m_stock && !m_animFrames.empty()) ? 6 : 60)) {
+        } else if (moving || ++m_blurAge >= (m_settings.bgMotion || (m_stock && m_animTex) ? 6 : 60)) {
             r.captureToOffscreen(false);
             r.applyBlur(2.5f, 2);
             m_blurAge = 0;
@@ -8280,6 +8280,12 @@ void CardsActivity::loadAnimBackground() {
     }
     std::sort(files.begin(), files.end());
     std::sort(m_animBlurPaths.begin(), m_animBlurPaths.end());
+    { // at most 8 of the small blurred ones (they change slowly): every step-th
+        m_animBlurStep = std::max<std::size_t>(1, (m_animBlurPaths.size() + 7) / 8);
+        std::vector<std::string> kept;
+        for (std::size_t i = 0; i < m_animBlurPaths.size(); i += m_animBlurStep) kept.push_back(m_animBlurPaths[i]);
+        m_animBlurPaths = std::move(kept);
+    }
     if (files.size() > 48) files.resize(48);
     m_animPaths = std::move(files);
     std::string rate;
@@ -8292,24 +8298,70 @@ bool CardsActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scre
     if (!m_settings.animBg || m_gpuSlow) return false;
     if (!m_animTried) loadAnimBackground();
     if (m_animPaths.empty()) return false;
-    if (m_animFrames.size() < m_animPaths.size()) {
-        auto tex = std::make_unique<nxui::Texture>();
-        if (tex->loadFromFile(app().gpu(), app().renderer(), m_animPaths[m_animFrames.size()], 960)) {
-            m_animFrames.push_back(std::move(tex));
-        } else { // unreadable, or no memory left for more: the loop is the frames that did load
-            m_animPaths.resize(m_animFrames.size());
+    // The files are read into RAM one a frame (JPEGs, ~0.2 MB each); nothing is uploaded until all are in.
+    if (m_animJpegs.size() < m_animPaths.size()) {
+        std::ifstream in(m_animPaths[m_animJpegs.size()], std::ios::binary | std::ios::ate);
+        std::vector<std::uint8_t> data;
+        if (in) {
+            const std::streamoff size = in.tellg();
+            if (size > 0 && size < (8 << 20)) {
+                data.resize(static_cast<std::size_t>(size));
+                in.seekg(0);
+                if (!in.read(reinterpret_cast<char*>(data.data()), size)) data.clear();
+            }
         }
+        if (data.empty()) m_animPaths.erase(m_animPaths.begin() + static_cast<std::ptrdiff_t>(m_animJpegs.size()));
+        else m_animJpegs.push_back(std::move(data));
+        if (m_animJpegs.size() < m_animPaths.size() || m_animJpegs.empty()) return false;
     }
-    if (m_animFrames.empty()) return false;
-    const bool ready = m_animFrames.size() == m_animPaths.size();
-    if (ready && m_animBlur.size() < m_animBlurPaths.size() && m_animBlur.size() < m_animFrames.size()) { // the small blurred ones, one a frame
+    const std::size_t n = m_animJpegs.size();
+    if (n == 0) return false;
+    const std::size_t idx = static_cast<std::size_t>(m_time * m_animFps) % n;
+    // The small blurred copies (the dock's glass): a few, one a frame.
+    if (m_animBlur.size() < m_animBlurPaths.size()) {
         auto tex = std::make_unique<nxui::Texture>();
-        if (tex->loadFromFile(app().gpu(), app().renderer(), m_animBlurPaths[m_animBlur.size()], 400)) m_animBlur.push_back(std::move(tex));
+        if (tex->loadFromFile(app().gpu(), app().renderer(), m_animBlurPaths[m_animBlur.size()], 320)) m_animBlur.push_back(std::move(tex));
         else m_animBlurPaths.clear();
     }
-    const std::size_t n = ready ? static_cast<std::size_t>(m_time * m_animFps) % m_animFrames.size() : 0;
-    m_animCur = n;
-    drawCover(r, m_animFrames[n].get(), screen, 0.f, kWhite);
+    m_animCur = std::min(idx / m_animBlurStep, m_animBlur.empty() ? std::size_t{0} : m_animBlur.size() - 1);
+    // A finished decode goes up as a texture; the one on screen is replaced when the next one is the one wanted.
+    if (m_animJob.valid() && m_animJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        Pixels px = m_animJob.get();
+        if (!px.rgba.empty()) {
+            auto tex = std::make_unique<nxui::Texture>();
+            nxui::GpuDevice::EssentialScope essential; // (two frames: always wanted)
+            if (tex->loadFromPixels(app().gpu(), app().renderer(), px.rgba.data(), px.w, px.h)) {
+                m_animNextTex = std::move(tex);
+                m_animNextIdx = m_animJobIdx;
+            }
+        }
+        m_animJobIdx = -1;
+    }
+    if (m_animNextTex && (m_animNextIdx == static_cast<int>(idx) || !m_animTex)) {
+        m_animTex = std::move(m_animNextTex); // (the old one is freed once the GPU is done with it)
+        m_animTexIdx = m_animNextIdx;
+        m_animNextIdx = -1;
+    }
+    // What to decode next: the frame that's wanted now if it isn't up, else the one after it.
+    const int want = m_animTexIdx == static_cast<int>(idx) ? static_cast<int>((idx + 1) % n) : static_cast<int>(idx);
+    if (!m_animJob.valid() && m_animNextIdx != want && m_animTexIdx != want) {
+        m_animJobIdx = want;
+        m_animJob = std::async(std::launch::async, [data = m_animJpegs[static_cast<std::size_t>(want)]]() {
+            offScreenCore();
+            Pixels px;
+            int w = 0, h = 0;
+            if (stbi_uc* p = decodePicture(data.data(), static_cast<int>(data.size()), w, h)) {
+                px.rgba.assign(p, p + static_cast<std::size_t>(w) * h * 4);
+                stbi_image_free(p);
+                px.w = w;
+                px.h = h;
+            }
+            threadDone();
+            return px;
+        });
+    }
+    if (!m_animTex || !m_animTex->valid()) return false;
+    drawCover(r, m_animTex.get(), screen, 0.f, kWhite);
     return true;
 }
 
