@@ -103,13 +103,14 @@ bool LiteActivity::onCreate() {
     const long long nowSec = static_cast<long long>(std::time(nullptr));
     const bool stale = m_atBoot || nowSec - m_settings.listsAt > 30 * 60 || nowSec < m_settings.listsAt;
     if (cards::loadLists(m_games, m_homebrew)) {
+        m_homebrew.erase(std::remove_if(m_homebrew.begin(), m_homebrew.end(), [](const Game& g) { return !g.path.empty(); }), m_homebrew.end());
         m_changesChecks = 5;
         if (stale) {
             startListRefresh(true);
         } else { // anything installed or downloaded meanwhile? (a count and the paths: quick)
             m_changesJob = std::async(std::launch::async, []() {
                 offScreenCore();
-                std::pair<int, std::uint64_t> c{cards::installedTitleCount(), cards::homebrewHash()};
+                std::pair<int, std::uint64_t> c{cards::installedTitleCount(), 0};
                 cards::threadDone();
                 return c;
             });
@@ -243,14 +244,7 @@ LiteActivity::Lists LiteActivity::readLists(bool titlesOnly, std::uint64_t known
     l.titles = static_cast<int>(titles.size());
     for (Game& g : titles) (g.homebrew ? l.homebrew : l.games).push_back(std::move(g));
     if (titlesOnly) return l;
-    l.nroHash = cards::homebrewHash();
-    if (knownNroHash && l.nroHash == knownNroHash) { // the same .nro files: not opened again
-        l.titlesOnly = true;
-        return l;
-    }
-    std::vector<Game> nros = cards::listHomebrew();
-    l.homebrew.insert(l.homebrew.begin(), std::make_move_iterator(nros.begin()), std::make_move_iterator(nros.end()));
-    for (std::size_t i = 0; i < l.homebrew.size(); ++i) l.homebrew[i].order = static_cast<int>(i);
+    // Only the installed titles and the NRO forwarders: the .nro files on the SD card are not listed.
     return l;
 }
 
@@ -272,15 +266,7 @@ void LiteActivity::takeLists(Lists lists) {
     }
     m_settings.titles = lists.titles;
     m_settings.save();
-    if (lists.titlesOnly) { // the .nro apps as they were, then the new NRO forwarders
-        std::vector<Game> all;
-        for (const Game& g : m_homebrew)
-            if (!g.path.empty()) all.push_back(g);
-        std::sort(all.begin(), all.end(), [](const Game& a, const Game& b) { return a.order < b.order; });
-        all.insert(all.end(), std::make_move_iterator(lists.homebrew.begin()), std::make_move_iterator(lists.homebrew.end()));
-        for (std::size_t i = 0; i < all.size(); ++i) all[i].order = static_cast<int>(i);
-        lists.homebrew = std::move(all);
-    }
+    for (std::size_t i = 0; i < lists.homebrew.size(); ++i) lists.homebrew[i].order = static_cast<int>(i);
     // Play times and last played stay as they were (the stats job reads them, not the lists).
     std::unordered_map<std::uint64_t, Game> had;
     for (const Game& g : m_games) had[g.id] = g;
