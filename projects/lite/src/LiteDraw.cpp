@@ -305,7 +305,7 @@ void LiteActivity::drawCard(nxui::Renderer& r, const nxui::Rect& card, const Gam
     if (t < 0.5f) // the ones beside the chosen one sit a little dimmer
         r.drawRoundedRect(card, nxui::Color(0.f, 0.f, 0.f, 0.18f * (1.f - t) * alpha), rad);
     if (t > 0.01f) { // the frame: a bright outer line and a white inner one, pulsing a little
-        const float ring = focusedRow ? 0.85f + 0.15f * std::sin(m_time * 4.f) : 0.55f;
+        const float ring = focusedRow ? 0.85f + 0.15f * std::sin(m_beat * 4.f) : 0.55f;
         r.drawRoundedRectOutline({card.x - 5.f, card.y - 5.f, card.width + 10.f, card.height + 10.f}, accent(ring * t * alpha), rad + 5.f, 4.5f);
         r.drawRoundedRectOutline(card, kWhite.withAlpha(0.85f * t * alpha), rad, 2.f);
     }
@@ -341,7 +341,7 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
     else r.drawCircle({fr.x + face * 0.5f, fr.y + face * 0.5f}, face * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.3f * a), 32);
     r.drawRoundedRectOutline(fr, kWhite.withAlpha(0.8f * a), face * 0.5f, 2.f);
     if (m_zone == Zone::Top)
-        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a),
+        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_beat * 5.f)) * a),
                                  face * 0.5f + 5.f, 3.f);
     const float hy = fr.y + face * 0.5f;
     drawStatus(r, a, hy, true);
@@ -379,7 +379,7 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
         const bool on = dock && m_dockSel == i;
         const float k = on ? 1.12f : 1.f;
         if (on) {
-            const float ring = 0.8f + 0.2f * std::sin(m_time * 5.f);
+            const float ring = 0.8f + 0.2f * std::sin(m_beat * 5.f);
             r.drawCircle({cx, cy}, 33.f, nxui::Color(1.f, 1.f, 1.f, 0.16f * a), 40);
             r.drawRoundedRectOutline({cx - 36.f, cy - 36.f, 72.f, 72.f}, accent(ring * a), 36.f, 3.f);
         }
@@ -622,7 +622,7 @@ void LiteActivity::drawMenu(nxui::Renderer& r) {
         const bool chosen = static_cast<int>(i) == m_menuSel;
         if (chosen) {
             r.drawRoundedRect(row, nxui::Color(1.f, 1.f, 1.f, 0.14f * a), 18.f);
-            r.drawRoundedRectOutline(row, accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * a), 18.f, 2.5f);
+            r.drawRoundedRectOutline(row, accent((0.8f + 0.2f * std::sin(m_beat * 5.f)) * a), 18.f, 2.5f);
         }
         textMid(r, m_fLabel, it.label, row.x + 20.f, row.y + row.height * 0.5f, (it.danger ? kRed : kWhite).withAlpha(a), 0.9f);
         if (it.value) {
@@ -927,7 +927,7 @@ void LiteActivity::drawGallery(nxui::Renderer& r) {
         else r.drawRoundedRect(tile, nxui::Color(1.f, 1.f, 1.f, 0.08f * ta), 14.f);
         r.drawGradientRect({tile.x, tile.y + tile.height - 34.f, tile.width, 34.f}, nxui::Color(0.f, 0.f, 0.f, 0.f), nxui::Color(0.f, 0.f, 0.f, 0.55f * ta));
         textMid(r, m_fBody, m_galTiles[(std::size_t)i].label, tile.x + 10.f, tile.y + tile.height - 13.f, kWhite.withAlpha(ta), 0.8f);
-        r.drawRoundedRectOutline(tile, chosen ? accent((0.8f + 0.2f * std::sin(m_time * 5.f)) * ta) : nxui::Color(1.f, 1.f, 1.f, 0.12f * ta), 14.f, chosen ? 3.f : 1.f);
+        r.drawRoundedRectOutline(tile, chosen ? accent((0.8f + 0.2f * std::sin(m_beat * 5.f)) * ta) : nxui::Color(1.f, 1.f, 1.f, 0.12f * ta), 14.f, chosen ? 3.f : 1.f);
     }
 }
 
@@ -1241,7 +1241,7 @@ void LiteActivity::drawLock(nxui::Renderer& r) {
         return;
     }
     // The way in, breathing.
-    const float pulse = 0.55f + 0.45f * (0.5f + 0.5f * std::sin(m_time * 2.4f));
+    const float pulse = 0.55f + 0.45f * (0.5f + 0.5f * std::sin(m_beat * 2.4f));
     const std::string hint = "Press any button";
     r.drawRoundedRect({640.f - 56.f, 612.f + lift, 112.f, 5.f}, nxui::Color(1.f, 1.f, 1.f, 0.55f * a * pulse), 2.5f);
     textMid(r, m_fLabel, hint, 640.f - measured(m_fLabel, hint).x * 0.5f, 648.f + lift, kWhite.withAlpha(0.85f * a * pulse));

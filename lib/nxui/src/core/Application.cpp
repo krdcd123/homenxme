@@ -220,10 +220,10 @@ void Application::run() {
         uint64_t nowTick = armGetSystemTick();
         float dt = static_cast<float>(nowTick - prevTick)
                  / static_cast<float>(armGetSystemTickFreq());
-        prevTick = nowTick;
         if (dt > 0.1f) dt = 0.016f;
 
         if (m_sleeping) {
+            prevTick = nowTick;
             // The console is asleep: nothing is on screen, so stop submitting
             // frames and stop touching input. The activity still gets a slow
             // tick because that is where the sleep/wake notification from the
@@ -243,6 +243,19 @@ void Application::run() {
 
         setPhase("reading the buttons");
         m_input.update();
+        // A screen that moves little asks for fewer frames: until one is due, rest (a press or a touch ends the wait).
+        if (m_activity && m_renderEnabled && !m_input.hasUserActivity()) {
+            const int every = m_activity->frameInterval();
+            if (every > 1) {
+                const float due = static_cast<float>(every) / 60.f - 0.004f;
+                const float since = static_cast<float>(nowTick - prevTick) / static_cast<float>(armGetSystemTickFreq());
+                if (since < due) {
+                    svcSleepThread(static_cast<int64_t>(std::min(due - since, 0.008f) * 1e9f) + 500'000LL);
+                    continue; // (prevTick stays: the time adds up for the next update)
+                }
+            }
+        }
+        prevTick = nowTick;
         if (m_input.hasUserActivity()) {
             idleSeconds = 0.f;
             skipIdleFrame = false;

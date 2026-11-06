@@ -988,11 +988,22 @@ void LiteActivity::askClose() {
 // ---------------------------------------------------------------- every frame
 
 void LiteActivity::onUpdate(float dt) {
-    dt = std::min(dt, 1.f / 30.f); // a slow frame doesn't jump everything ahead
+    dt = std::min(dt, frameInterval() > 1 ? 0.12f : 1.f / 30.f); // a slow frame doesn't jump everything ahead
     pumpDaemon();
     if (m_asleep) return;
     m_time += dt;
     app().input().mergeRightStick();
+    {
+        // How often frames are drawn: every refresh while anything moves or a button is used; else only as often as
+        // the background changes (the GPU and the CPU rest in between: less heat, less battery).
+        const int every = frameInterval();
+        const float hz = 60.f / static_cast<float>(every > 1 ? every : 3);
+        m_beat = std::floor(m_time * hz) / hz;
+        if (app().input().hasUserActivity()) m_busyUntil = m_time + 0.7f;
+        m_moving = m_intro < 1.f || m_menuIn < 1.f || m_statsIn < 1.f || m_galIn < 1.f || m_pressT < 1.f || m_pageIn < 1.f
+                   || std::abs(m_scroll - scrollTarget()) > 0.001f || m_leaving || m_returnTex || m_messageFor > 0.f
+                   || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
+    }
 
     // What the first frame doesn't need starts later, so HOME coming back from a game doesn't hitch on it.
     if (m_startStage < 3) {
@@ -1117,7 +1128,7 @@ void LiteActivity::onUpdate(float dt) {
     }
     // The row is refreshed now and then (a game just played moves to the front).
     if ((m_rebuildIn -= dt) <= 0.f) {
-        m_rebuildIn = 1.f;
+        m_rebuildIn = 5.f;
         if (!m_leaving) rebuildList();
     }
     wantIcons();
@@ -1228,6 +1239,20 @@ void LiteActivity::onUpdate(float dt) {
     if (in.isDown(B::Plus)) openOptions();
     if (in.isDown(B::X)) askClose();
     if (in.isDown(B::Minus)) openStats();
+}
+
+
+// The refreshes between two frames: 1 (every refresh) while anything moves; otherwise the background's own pace
+// (a 10 frames a second animation is drawn 20 times a second: each of its pictures twice).
+int LiteActivity::frameInterval() const {
+    if (m_asleep || m_moving || m_time < m_busyUntil || m_returnTex || m_startStage < 3) return 1;
+    if (m_settings.animBg && !m_gpuSlow && !m_animPaths.empty()) {
+        if (m_animFps <= 10.f) return 3;
+        if (m_animFps <= 15.f) return 2;
+        if (m_animFps <= 20.f) return 3;
+        return m_animFps <= 30.f ? 2 : 1;
+    }
+    return 4; // nothing but the slow pulse of the chosen one's ring: 15 a second
 }
 
 } // namespace lite

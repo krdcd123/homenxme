@@ -43,6 +43,7 @@ public:
     bool presentInitialFrame(nxui::Renderer& ren) override;
     void onDestroy() override;
     void onUpdate(float dt) override;
+    int frameInterval() const override;
     void onRender(nxui::Renderer&) override {}
     nxui::Widget* focusRoot() override { return nullptr; } // it reads the buttons itself
 
@@ -190,6 +191,9 @@ private:
     std::uint64_t m_startSuspended = 0;
     bool m_startRunning = false, m_atBoot = true;
     float m_time = 0.f;
+    float m_beat = 0.f;      // m_time in the steps of the frames that are drawn (so the pulses step evenly)
+    float m_busyUntil = 0.f; // a press, a touch or a movement: every refresh is drawn until then
+    bool m_moving = false;   // something is animating
     int m_startStage = 0;
 
     std::vector<Game> m_games, m_homebrew; // the installed titles, the .nro apps (and NRO forwarders)

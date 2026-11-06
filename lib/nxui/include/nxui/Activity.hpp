@@ -37,6 +37,11 @@ public:
     /// Called before GPU / Renderer shutdown.
     virtual void onDestroy() {}
 
+    /// How many 60 Hz refreshes pass between two frames while the buttons are untouched: 1 is every refresh
+    /// (the default); 3 is 20 frames a second. A screen that only moves a little (a background at 10 frames a
+    /// second) asks for fewer, and the GPU and CPU rest in between. Any press or touch brings back every refresh.
+    virtual int frameInterval() const { return 1; }
+
     /// Called each frame. Input has already been updated.
     virtual void onUpdate(float dt) {}
 
