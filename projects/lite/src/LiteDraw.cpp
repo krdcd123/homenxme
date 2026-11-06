@@ -192,7 +192,23 @@ bool LiteActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scree
         }
         if (data.empty()) m_animPaths.erase(m_animPaths.begin() + static_cast<std::ptrdiff_t>(m_animJpegs.size()));
         else m_animJpegs.push_back(std::move(data));
-        if (m_animJpegs.size() < m_animPaths.size() || m_animJpegs.empty()) return false;
+        if (m_animJpegs.size() == 1 && !m_animTex) { // the first picture goes up at once: HOME never shows the plain gradient
+            int w = 0, h = 0;
+            if (stbi_uc* p = cards::decodePicture(m_animJpegs[0].data(), static_cast<int>(m_animJpegs[0].size()), w, h)) {
+                auto tex = std::make_unique<nxui::Texture>();
+                nxui::GpuDevice::EssentialScope essential;
+                if (tex->loadFromPixels(app().gpu(), app().renderer(), p, w, h)) {
+                    m_animTex = std::move(tex);
+                    m_animTexIdx = 0;
+                }
+                stbi_image_free(p);
+            }
+        }
+        if (m_animJpegs.size() < m_animPaths.size() || m_animJpegs.empty()) { // (the rest are read, a file a frame)
+            if (!m_animTex || !m_animTex->valid()) return false;
+            drawCover(r, m_animTex.get(), screen, 0.f, kWhite);
+            return true;
+        }
     }
     const std::size_t n = m_animJpegs.size();
     if (n == 0) return false;
@@ -301,6 +317,15 @@ void LiteActivity::drawCard(nxui::Renderer& r, const nxui::Rect& card, const Gam
         const std::string name = fit(m_fLabel, g.name, card.width - 24.f, 0.9f);
         textMid(r, m_fLabel, name, card.x + (card.width - measured(m_fLabel, name).x * 0.9f) * 0.5f, card.y + card.height * 0.5f,
                 kMuted.withAlpha(alpha), 0.9f);
+    }
+    if (!m_grid && g.id == m_running && g.action.empty() && m_running) { // open now: a pill at the bottom of the icon
+        const std::string word = "Resume";
+        const float w = 20.f + 10.f + measured(m_fBadge, word).x + 16.f;
+        const nxui::Rect pill{card.x + (card.width - w) * 0.5f, card.y + card.height - 46.f, w, 32.f};
+        frostFast(r, pill, 16.f, nxui::Color(0.05f, 0.07f, 0.09f, 0.55f * alpha));
+        r.drawRoundedRectOutline(pill, nxui::Color(1.f, 1.f, 1.f, 0.2f * alpha), 16.f, 1.5f);
+        icon(r, "play", pill.x + 20.f, pill.y + 16.f, 16.f, kGreen.withAlpha(alpha));
+        textMid(r, m_fBadge, word, pill.x + 34.f, pill.y + 16.f, kWhite.withAlpha(alpha));
     }
     if (t < 0.5f) // the ones beside the chosen one sit a little dimmer
         r.drawRoundedRect(card, nxui::Color(0.f, 0.f, 0.f, 0.18f * (1.f - t) * alpha), rad);

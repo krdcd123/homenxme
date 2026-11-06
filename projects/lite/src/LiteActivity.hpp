@@ -193,6 +193,7 @@ private:
     bool m_startRunning = false, m_atBoot = true;
     float m_time = 0.f;
     float m_beat = 0.f;      // m_time in the steps of the frames that are drawn (so the pulses step evenly)
+    std::uint64_t m_running = 0; // the game or app that is open (suspended)
     float m_busyUntil = 0.f; // a press, a touch or a movement: every refresh is drawn until then
     bool m_moving = false;   // something is animating
     int m_startStage = 0;

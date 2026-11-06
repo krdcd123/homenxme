@@ -1,6 +1,7 @@
 #ifdef SWITCHU_MENU // (the HOME build only: the standalone .nro has no daemon to talk to)
 // LiteNX: the lists, icons, status, starting things and the daemon (the drawing is in LiteDraw.cpp).
 #include "LiteActivity.hpp"
+#include <switchu/file_log.hpp>
 
 #include "LiteCommon.hpp"
 #include "smi_commands.hpp"
@@ -94,7 +95,7 @@ bool LiteActivity::onCreate() {
     // The few glyphs the header and dock use (small files, read once).
     {
         nxui::GpuDevice::EssentialScope essential;
-        for (const char* name : {"wifi", "airplane", "gear", "power", "pad"}) {
+        for (const char* name : {"wifi", "airplane", "gear", "power", "pad", "play"}) {
             auto tex = std::make_unique<nxui::Texture>();
             if (tex->loadFromFile(gpu, ren, std::string(cards::kAssets) + "icons/" + name + ".png", 96)) m_glyphs[name] = std::move(tex);
         }
@@ -717,6 +718,7 @@ void LiteActivity::pumpDaemon() {
                 m_charging = switchu::smi::batteryPayloadCharging(n.payload);
                 break;
             case M::SleepSequence: // stop drawing (a loop that keeps drawing never lets it sleep)
+                switchu::FileLog::log("[lite] sleep sequence (lock screen %d, game open %d)", m_settings.lockScreen ? 1 : 0, runningId() ? 1 : 0);
                 m_asleep = true;
                 m_sleepFlag = true;
                 m_audio.pause();
@@ -729,6 +731,7 @@ void LiteActivity::pumpDaemon() {
                 app().setSleeping(true);
                 break;
             case M::WakeUp:
+                switchu::FileLog::log("[lite] wake up (locked %d)", m_locked ? 1 : 0);
                 m_asleep = false;
                 m_sleepFlag = false;
                 app().setSleeping(false);
@@ -997,6 +1000,7 @@ void LiteActivity::onUpdate(float dt) {
     dt = std::min(dt, frameInterval() > 1 ? 0.12f : 1.f / 30.f); // a slow frame doesn't jump everything ahead
     pumpDaemon();
     if (m_asleep) return;
+    m_running = runningId(); // (read once a frame: the cards that say Resume)
     m_time += dt;
     app().input().mergeRightStick();
     {
