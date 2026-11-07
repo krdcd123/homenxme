@@ -20,6 +20,7 @@
 #include <cctype>
 #include <map>
 #include <atomic>
+#include <thread>
 #include <mutex>
 #include <vector>
 #include <string>
@@ -1245,9 +1246,17 @@ static bool handleGeneralChannel() {
     return true;
 }
 
+// Where the daemon's loop is right now, and since when. A thread reports it when the loop stands still: the freezes
+// after Home leave the log silent from the moment HOME's process starts, and this says what the daemon was doing.
+static std::atomic<const char*> g_phase{"starting"};
+static std::atomic<u64> g_phaseAt{0};
+static inline void ph(const char* what) { g_phase.store(what); g_phaseAt.store(nowNs()); }
+
 static bool handleAppletMessages() {
     u32 msg = 0;
+    ph("asking AM for a message");
     Result rc = appletGetMessage(&msg);
+    ph("handling an applet message");
     if (R_FAILED(rc))
         return false;
 
@@ -2190,12 +2199,39 @@ static void watchMenuStart() {
     activeSince = 0;
 }
 
+static void startLoopWatchdog() {
+    static std::thread t;
+    ph("starting");
+    t = std::thread([]() {
+        u64 reported = 0;
+        for (;;) {
+            svcSleepThread(1'000'000'000ULL);
+            const char* what = g_phase.load();
+            const u64 at = g_phaseAt.load();
+            if (!at || !what || std::strcmp(what, "waiting") == 0) { reported = 0; continue; }
+            const u64 stuck = nowNs() - at;
+            if (stuck >= 3'000'000'000ULL && (reported == 0 || stuck - reported >= 5'000'000'000ULL)) {
+                reported = stuck;
+                switchu::FileLog::logCommit("[wd] the daemon has been in '%s' for %llu s", what,
+                                            (unsigned long long)(stuck / 1'000'000'000ULL));
+            }
+        }
+    });
+    t.detach();
+}
+
 static void mainLoop() {
+    ph("watching the menu start");
     watchMenuStart();
+    ph("general channel");
     for (int i = 0; i < 16 && handleGeneralChannel(); ++i) {}
+    ph("applet messages");
     for (int i = 0; i < 16 && handleAppletMessages(); ++i) {}
+    ph("launch requests");
     takeLaunchRequests();
+    ph("menu commands");
     drainMenuCommands();
+    ph("the rest of the loop");
 
     // SPSM terminates the process asynchronously. Do not schedule catalogue,
     // cache or logging work after the power request has begun.
@@ -2225,6 +2261,7 @@ static void mainLoop() {
         g_appCatalogRefreshPending.store(false);
         clearCatalogHold();
         bool catalogChanged = false;
+        ph("rebuilding the app catalog");
         if (rebuildAppCatalog("record-event", &catalogChanged)) {
             if (catalogChanged) {
                 if (daemon::menu_la::isActive())
@@ -2247,6 +2284,7 @@ static void mainLoop() {
     if (g_eventPollsRemaining > 0 && shouldDeferViewPolling()) {
         g_eventPollCountdown = kViewPollIntervalTicks;
     } else if (g_eventPollsRemaining > 0 && --g_eventPollCountdown == 0) {
+        ph("reading the view flags");
         bool needFullReload = sendViewFlagsUpdates();
         if (needFullReload) {
             if (daemon::menu_la::isActive())
@@ -2735,9 +2773,11 @@ int main(int argc, char* argv[]) {
 
     switchu::daemon::achievements_watch::start();
 
+    startLoopWatchdog();
     while (g_running.load()) {
         switchu::timebudget::syncBootTime(); // until it has worked once
         mainLoop();
+        ph("waiting");
         waitForMainWork();
     }
 
