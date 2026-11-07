@@ -963,7 +963,52 @@ static u64 g_sleepReturnedAt = 0;   // armTicksToNs when the last sleep call ret
 static u64 g_lastCommitAt = 0;
 static u64 nowNs() { return armTicksToNs(armGetSystemTick()); }
 
+// A forwarder (or homebrew host) left open behind HOME has never survived the
+// console's real sleep here: the wake never comes and the console has to be
+// forced off, taking the game with it. For those the screen is turned off and
+// HOME locked while the console stays awake, so the game keeps running; the
+// real sleep is only used after a long while (the battery).
+static uint64_t g_homebrewHostTitleId = 0;
+static bool g_fakeSleeping = false;
+static u64 g_fakeSleepAt = 0;
+static constexpr u64 kFakeSleepLimitNs = 30ULL * 60ULL * 1'000'000'000ULL;
+
+static bool riskyAppOpen() {
+    if (!daemon::app::isRunning()) return false;
+    const u64 tid = daemon::app::snapshot().titleId;
+    if (!tid) return false;
+    return (tid >> 56) != 0x01 || tid == g_homebrewHostTitleId;
+}
+
+static void fakeSleepOn(const char* source) {
+    switchu::FileLog::logCommit("[power] %s: a forwarder is open; screen off, console stays awake", source);
+    pushNotification(smi::MenuMessage::SleepSequence);
+    switchu::commitSdCard("fake sleep");
+    svcSleepThread(80'000'000ULL);
+    if (g_lblReady) lblSwitchBacklightOff(0);
+    g_fakeSleeping = true;
+    g_fakeSleepAt = nowNs();
+}
+
+static void fakeSleepOff(const char* why) {
+    if (!g_fakeSleeping) return;
+    g_fakeSleeping = false;
+    if (g_lblReady) lblSwitchBacklightOn(0);
+    switchu::FileLog::logCommit("[power] screen back on (%s)", why);
+    pushNotification(smi::MenuMessage::WakeUp);
+}
+
 static void startSleepSequence(const char* source) {
+    if (g_fakeSleeping) {
+        if (nowNs() - g_fakeSleepAt > 1'500'000'000ULL) fakeSleepOff(source); // (a duplicate press right after is ignored)
+        return;
+    }
+    if (riskyAppOpen()) {
+        const char* fl = "sdmc:/config/SwitchU/real_sleep_always";
+        std::FILE* f = std::fopen(fl, "rb");
+        if (f) std::fclose(f);
+        else { fakeSleepOn(source); return; }
+    }
     // Hammering the power button queues several sleep requests back to back.
     // Starting a new sleep while the console is still finishing the previous
     // wake is what appears to leave the system wedged, so let each wake settle.
@@ -1058,6 +1103,7 @@ static void startPowerSequence(const char* source, smi::SystemMessage action) {
 }
 
 static void openMenuFromHome(const char* source) {
+    if (g_fakeSleeping) { fakeSleepOff("HOME pressed"); return; }
     const uint64_t homeStartedAt = armGetSystemTick();
     logHomeState(source, "request");
     cancelViewPolling("home");
@@ -1333,7 +1379,6 @@ static bool consumeForegroundAppletHomeRequest() {
 }
 
 // HomeNX: the title currently borrowed to run homebrew as an application.
-static uint64_t g_homebrewHostTitleId = 0;
 static uint64_t g_homebrewLaunchedAt = 0;
 // Settings > HomeNX "Sphaira as an application" off (it writes "settings" in it):
 // the menu uses the Album. Older builds wrote it themselves after one failed
@@ -2135,6 +2180,17 @@ static void drainMenuCommands() {
 }
 
 static void mainLoop() {
+    if (g_fakeSleeping && nowNs() - g_fakeSleepAt > kFakeSleepLimitNs) {
+        // Long enough: save the battery with the real sleep after all.
+        switchu::FileLog::logCommit("[power] fake sleep limit reached; real sleep");
+        g_fakeSleeping = false;
+        if (g_lblReady) lblSwitchBacklightOn(0);
+        pushNotification(smi::MenuMessage::SleepSequence);
+        switchu::commitSdCard("sleep");
+        svcSleepThread(50'000'000ULL);
+        appletStartSleepSequence(true);
+        g_sleepReturnedAt = nowNs();
+    }
     for (int i = 0; i < 16 && handleGeneralChannel(); ++i) {}
     for (int i = 0; i < 16 && handleAppletMessages(); ++i) {}
     takeLaunchRequests();
