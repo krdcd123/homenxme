@@ -1082,6 +1082,11 @@ void LiteActivity::onUpdate(float dt) {
                    || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
     }
 
+    if (!m_readySent && m_time > 0.15f) { // (the daemon restarts HOME if it never hears this)
+        m_readySent = true;
+        switchu::menu::smi_cmd::menuReady();
+    }
+
     // What the first frame doesn't need starts later, so HOME coming back from a game doesn't hitch on it.
     if (m_startStage < 3) {
         if (m_startStage < 2 && (m_time > 1.5f || (m_chimeWanted && m_time > 0.08f))) {

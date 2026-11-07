@@ -274,6 +274,7 @@ private:
     std::atomic<bool> m_animDone{false};
     std::future<void> m_animReadJob;
     bool m_appletReturn = false;                         // back from the Album or the controller screen: not from a game
+    bool m_readySent = false;
     bool m_chimeWanted = false;                          // HOME came back from a game: a small sound
     std::vector<std::unique_ptr<nxui::Texture>> m_animBlur;
     std::size_t m_animBlurStep = 1, m_animCur = 0;

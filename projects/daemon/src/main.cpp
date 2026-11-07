@@ -961,7 +961,9 @@ static void requestPowerStateChange(const char* source, bool reboot) {
 // whole sleep, which is what flattened the battery in sleep mode.
 static u64 g_sleepReturnedAt = 0;   // armTicksToNs when the last sleep call returned
 static u64 g_lastCommitAt = 0;
-static u64 g_lastWakeAt = 0;       // nowNs() at the last Wakeup message
+static u64 g_lastWakeAt = 0;
+static bool g_menuReadySeen = false;   // the menu has said it is up (LiteNX does)
+static int g_menuStartRetries = 0;       // nowNs() at the last Wakeup message
 static u64 nowNs() { return armTicksToNs(armGetSystemTick()); }
 
 static void startSleepSequence(const char* source) {
@@ -1923,6 +1925,8 @@ static bool handleMenuCommand() {
 
     case smi::SystemMessage::MenuReady:
         switchu::FileLog::log("[smi] menu ready");
+        g_menuReadySeen = true;
+        g_menuStartRetries = 0;
         g_lastOperationFailure = {};
         g_batteryRefreshPending.store(true);
         // The menu is up: the catch-up view polls behind a game's record event
@@ -2147,7 +2151,37 @@ static void drainMenuCommands() {
     for (int i = 0; i < 32 && handleMenuCommand(); ++i) {}
 }
 
+// LiteNX tells the daemon when it is up. If HOME's process was started and never says so, it is restarted once:
+// a start that stalls then doesn't leave the screen on the game's last frame. (Only for LiteNX: the other
+// frontends don't send the message.)
+static void watchMenuStart() {
+    static bool prevActive = false;
+    static u64 activeSince = 0;
+    static int lite = -1; // -1 unknown, 0 no, 1 yes (read when a start is seen)
+    const bool act = daemon::menu_la::isActive();
+    if (act && !prevActive) {
+        activeSince = nowNs();
+        g_menuReadySeen = false;
+        std::string style;
+        std::ifstream f("sdmc:/config/SwitchU/frontend.txt");
+        std::getline(f, style);
+        lite = style.rfind("cards-lite", 0) == 0 ? 1 : 0;
+    }
+    if (!act) activeSince = 0;
+    prevActive = act;
+    if (!act || lite != 1 || g_menuReadySeen || activeSince == 0) return;
+    if (nowNs() - activeSince < 9'000'000'000ULL) return;
+    if (g_menuStartRetries >= 1) return;
+    ++g_menuStartRetries;
+    switchu::FileLog::logCommit("[menu] HOME never said it was up after 9 s; starting it again");
+    daemon::menu_la::terminateWithin(2'000'000'000ULL);
+    const Result rc = daemon::menu_la::launch(smi::MenuStartMode::MainMenu, buildSystemStatus());
+    switchu::FileLog::logCommit("[menu] second start rc=0x%X", rc);
+    activeSince = 0;
+}
+
 static void mainLoop() {
+    watchMenuStart();
     for (int i = 0; i < 16 && handleGeneralChannel(); ++i) {}
     for (int i = 0; i < 16 && handleAppletMessages(); ++i) {}
     takeLaunchRequests();
