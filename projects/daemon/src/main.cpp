@@ -912,8 +912,10 @@ static Result launchPendingHomeMenu() {
     // LiteNX: over a game, HOME is created hidden and asks for the screen itself, so the console's own
     // switch-over (where the freezes are) is left out. An empty no_hidden_start file turns it off.
     std::error_code hideEc;
+    // (The log showed that a hidden HOME can never ask for the screen: the call is refused with "not initialized".
+    // So this is off unless an empty hidden_start file asks for it.)
     daemon::menu_la::g_hiddenNext = status.app_running && frontend.rfind("cards-lite", 0) == 0
-        && !std::filesystem::exists("sdmc:/config/SwitchU/no_hidden_start", hideEc);
+        && std::filesystem::exists("sdmc:/config/SwitchU/hidden_start", hideEc);
     const uint64_t launchStartedAt = armGetSystemTick();
     const Result rc = daemon::menu_la::launch(smi::MenuStartMode::MainMenu, status);
     daemon::menu_la::g_hiddenNext = false;
@@ -1010,6 +1012,12 @@ static void startSleepSequence(const char* source) {
     // sleep is started the way the stock HOME starts it, with none of the extra steps. The freezes only ever came
     // after sleeps that had all of them.
     if (!menuOnScreen()) {
+        if (g_standbyActive) { // the console did not wake with a HOME waiting behind the game, so it goes first
+            g_standbyActive = false;
+            g_standbyWakeAt = 0;
+            switchu::FileLog::logCommit("[standby] closing the waiting HOME before sleep");
+            daemon::menu_la::terminateWithin(2'000'000'000ULL);
+        }
         switchu::FileLog::logCommit("[power] game on screen: plain sleep, no extra steps");
         const Result plainRc = appletStartSleepSequence(true);
         g_sleepReturnedAt = nowNs();
@@ -2216,10 +2224,8 @@ static void startStandby() {
     if (g_standbyActive || !standbyWanted()) return;
     const int base = g_menuReadyCount;
     auto status = buildSystemStatus();
-    status._pad[1] = 1; // standby: stays hidden and quiet until told
-    daemon::menu_la::g_hiddenNext = true;
+    status._pad[1] = 1; // standby: stays quiet until told (started as an ordinary HOME: a hidden one can't get the screen)
     const Result rc = daemon::menu_la::launch(smi::MenuStartMode::MainMenu, status);
-    daemon::menu_la::g_hiddenNext = false;
     if (R_FAILED(rc)) {
         switchu::FileLog::logCommit("[standby] start failed rc=0x%X", rc);
         return;
