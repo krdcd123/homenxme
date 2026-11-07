@@ -53,9 +53,9 @@ bool parseUid(const std::string& hex, cards::AccountUidLike& out) {
 constexpr const char* kRecentPath = "sdmc:/config/LiteNX/recent.tsv";
 } // namespace
 
-LiteActivity::LiteActivity(std::uint64_t suspendedId, bool appRunning, bool atBoot, bool appletReturn, bool hiddenStart)
+LiteActivity::LiteActivity(std::uint64_t suspendedId, bool appRunning, bool atBoot, bool appletReturn, bool hiddenStart, bool standby)
     : m_startSuspended(suspendedId), m_startRunning(appRunning), m_atBoot(atBoot), m_appletReturn(appletReturn),
-      m_hiddenStart(hiddenStart) {}
+      m_standby(standby), m_hiddenStart(hiddenStart) {}
 
 // ---------------------------------------------------------------- start and stop
 
@@ -772,7 +772,20 @@ void LiteActivity::pumpDaemon() {
                 m_battery = std::to_string(switchu::smi::batteryPayloadPercentage(n.payload)) + "%";
                 m_charging = switchu::smi::batteryPayloadCharging(n.payload);
                 break;
+            case M::StandbyWake: // HOME was waiting behind the game: take the screen now
+                if (!m_standby) break;
+                switchu::FileLog::logCommit("[lite] standby: woken, asking for the screen");
+                m_standby = false;
+                app().setSleeping(false);
+                m_hiddenStart = true;
+                m_gotFocus = false;
+                m_readySent = false;
+                m_nextAsk = m_time;
+                m_intro = 0.f;
+                m_chimeWanted = true;
+                break;
             case M::SleepSequence: // stop drawing (a loop that keeps drawing never lets it sleep)
+                if (m_standby) break; // (hidden: the game has the screen)
                 switchu::FileLog::log("[lite] sleep sequence (lock screen %d, game open %d)", m_settings.lockScreen ? 1 : 0, runningId() ? 1 : 0);
                 m_asleep = true;
                 m_sleepFlag = true;
@@ -787,6 +800,7 @@ void LiteActivity::pumpDaemon() {
                 switchu::FileLog::logCommit("[lite] sleep frames drawn; waiting");
                 break;
             case M::WakeUp:
+                if (m_standby) break;
                 switchu::FileLog::log("[lite] wake up (locked %d)", m_locked ? 1 : 0);
                 m_asleep = false;
                 m_sleepFlag = false;
@@ -1083,6 +1097,15 @@ void LiteActivity::onUpdate(float dt) {
                    || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
     }
 
+    if (m_standby) { // waiting hidden behind a game: say so, then stay quiet until the daemon wakes us
+        if (!m_readySent && m_time > 0.15f) {
+            m_readySent = true;
+            switchu::menu::smi_cmd::menuReady();
+            switchu::FileLog::logCommit("[lite] standby: waiting behind the game");
+            app().setSleeping(true);
+        }
+        return;
+    }
     if (m_hiddenStart && !m_gotFocus) { // started hidden: ask for the screen until it is ours
         if (appletGetFocusState() == AppletFocusState_InFocus) {
             m_gotFocus = true;

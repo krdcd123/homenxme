@@ -265,12 +265,24 @@ static uint64_t g_homeForegroundTick = 0;
 static uint8_t g_lastBatteryPercent = 0xFF;
 static PsmChargerType g_lastChargerType = (PsmChargerType)0xFF;
 
+// HomeNX standby (LiteNX, opt-in: an empty sdmc:/config/SwitchU/standby_home file): HOME's process is started while
+// a game is being launched or resumed and waits hidden behind it, so that pressing Home brings it to the front
+// instead of creating a process while the game runs (where the console froze).
+static bool g_standbyActive = false;
+static u64 g_standbyWakeAt = 0;
+static int g_menuReadyCount = 0;
+static int g_standbyReadyBase = 0;
+// The menu is on the screen (a standby one is running but hidden).
+static bool menuOnScreen() { return daemon::menu_la::isActive() && !g_standbyActive; }
+static bool wakeStandby(const char* why);
+static void startStandby();
+
 static bool shouldDeferViewPolling() {
     // HomeNX: nothing slow on this thread while HOME is being opened.
     if (g_pendingHomeMenuLaunch) return true;
     return daemon::app::isRunning() &&
            daemon::app::hasForeground() &&
-           !daemon::menu_la::isActive() &&
+           !menuOnScreen() &&
            !g_foregroundAppletActive;
 }
 
@@ -888,6 +900,11 @@ static Result launchPendingHomeMenu() {
     g_pendingHomeMenuSource = nullptr;
     g_pendingHomeMenuStartedAt = 0;
 
+    if (wakeStandby(source)) { // HOME is already running, hidden: bring it forward, no new process
+        switchu::FileLog::logCommit("[%s] HOME foreground acquired; standby HOME told to come forward", source);
+        return 0;
+    }
+
     const auto status = buildSystemStatus();
     switchu::FileLog::log(
         "[%s] HOME foreground acquired; launching MainMenu status.running=%d suspended=0x%016lX",
@@ -971,6 +988,7 @@ static u64 g_lastWakeAt = 0;
 static bool g_gameKeptScreenAtSleep = false; // the game had the screen when the console went to sleep
 static bool g_menuReadySeen = false;   // the menu has said it is up (LiteNX does)
 static int g_menuStartRetries = 0;       // nowNs() at the last Wakeup message
+
 static u64 nowNs() { return armTicksToNs(armGetSystemTick()); }
 
 static void startSleepSequence(const char* source) {
@@ -991,7 +1009,7 @@ static void startSleepSequence(const char* source) {
     // With a game on screen there is no HOME to tell, nothing for the SD card to wait on and nothing to draw: the
     // sleep is started the way the stock HOME starts it, with none of the extra steps. The freezes only ever came
     // after sleeps that had all of them.
-    if (!daemon::menu_la::isActive()) {
+    if (!menuOnScreen()) {
         switchu::FileLog::logCommit("[power] game on screen: plain sleep, no extra steps");
         const Result plainRc = appletStartSleepSequence(true);
         g_sleepReturnedAt = nowNs();
@@ -1111,14 +1129,14 @@ static void openMenuFromHome(const char* source) {
 
     // A game that is still starting up can wedge the console if it is pulled
     // back to HOME mid-load, so HOME waits until it has had time to come up.
-    if (!daemon::menu_la::isActive() && daemon::app::isRunning()
+    if (!menuOnScreen() && daemon::app::isRunning()
         && daemon::app::msSinceLaunch() < 6000) {
         switchu::FileLog::log("[%s] HOME ignored: the game is still loading (%llu ms)", source,
                               (unsigned long long)daemon::app::msSinceLaunch());
         return;
     }
 
-    if (!daemon::menu_la::isActive() && !g_foregroundAppletActive && appMayOwnScreen()) {
+    if (!menuOnScreen() && !g_foregroundAppletActive && appMayOwnScreen()) {
         if (!takeForegroundFromRunningApp(source)) {
             switchu::FileLog::log("[%s] HOME aborted: foreground request failed", source);
             return;
@@ -1134,7 +1152,7 @@ static void openMenuFromHome(const char* source) {
         return;
     }
 
-    if (daemon::menu_la::isActive()) {
+    if (menuOnScreen()) {
         switchu::FileLog::log("[%s] HOME forwarding HomeRequest to active menu", source);
         pushNotification(smi::MenuMessage::HomeRequest);
     } else if (g_foregroundAppletActive) {
@@ -1295,7 +1313,7 @@ static bool handleAppletMessages() {
         // If the game itself has the screen (HOME isn't up), the console puts it to sleep and gives it the screen back
         // on its own. Marking it suspended here and asking for the foreground again at the wake was the one extra
         // step before HOME's start froze (several times, after a wake), so the game is left alone.
-        g_gameKeptScreenAtSleep = daemon::app::isRunning() && daemon::app::hasForeground() && !daemon::menu_la::isActive();
+        g_gameKeptScreenAtSleep = daemon::app::isRunning() && daemon::app::hasForeground() && !menuOnScreen();
         if (!g_gameKeptScreenAtSleep) daemon::app::onHomeSuspend();
         // A stale duplicate from rapid power presses lands the instant the
         // previous sleep returns; sleeping again for it is a spurious cycle.
@@ -1314,13 +1332,13 @@ static bool handleAppletMessages() {
         g_batteryRefreshPending.store(true);
         // Deliver wake before requesting the menu foreground, so it can put
         // the lock screen up before its first visible frame.
-        if (daemon::menu_la::isActive())
+        if (menuOnScreen())
             pushNotification(smi::MenuMessage::WakeUp);
         const bool oldWake = [] { std::FILE* f = std::fopen("sdmc:/config/SwitchU/resume_on_wake", "rb"); if (f) std::fclose(f); return f != nullptr; }();
-        if (g_gameKeptScreenAtSleep && !oldWake && daemon::app::isRunning() && !daemon::menu_la::isActive()) {
+        if (g_gameKeptScreenAtSleep && !oldWake && daemon::app::isRunning() && !menuOnScreen()) {
             g_gameKeptScreenAtSleep = false;
             switchu::FileLog::logCommit("[ae] wake: the game kept the screen; no resume asked for");
-        } else if (daemon::app::isRunning() && !daemon::menu_la::isActive()) {
+        } else if (daemon::app::isRunning() && !menuOnScreen()) {
             g_gameKeptScreenAtSleep = false;
             Result rc = daemon::app::resume();
             if (R_FAILED(rc)) {
@@ -1953,6 +1971,7 @@ static bool handleMenuCommand() {
         switchu::FileLog::log("[smi] menu ready");
         g_menuReadySeen = true;
         g_menuStartRetries = 0;
+        ++g_menuReadyCount;
         g_lastOperationFailure = {};
         g_batteryRefreshPending.store(true);
         // The menu is up: the catch-up view polls behind a game's record event
@@ -2032,6 +2051,7 @@ static bool handleAction(daemon::SystemAction& action) {
         }
 
         case daemon::SystemActionType::ResumeApplication: {
+            startStandby();
             switchu::FileLog::log("[action] resume: calling app::resume()");
             Result rc = daemon::app::resume();
             switchu::FileLog::log("[action] resume: app::resume() -> 0x%X", rc);
@@ -2177,6 +2197,56 @@ static void drainMenuCommands() {
     for (int i = 0; i < 32 && handleMenuCommand(); ++i) {}
 }
 
+static bool standbyWanted() {
+    std::string style;
+    {
+        std::ifstream f("sdmc:/config/SwitchU/frontend.txt");
+        std::getline(f, style);
+    }
+    if (style.rfind("cards-lite", 0) != 0) return false;
+    std::error_code ec;
+    return std::filesystem::exists("sdmc:/config/SwitchU/standby_home", ec);
+}
+
+static void drainMenuCommands();
+
+// Start HOME hidden, now, before the game takes the screen (the game is still behind: this is when process
+// creation has been safe), and wait for it to say it is up.
+static void startStandby() {
+    if (g_standbyActive || !standbyWanted()) return;
+    const int base = g_menuReadyCount;
+    auto status = buildSystemStatus();
+    status._pad[1] = 1; // standby: stays hidden and quiet until told
+    daemon::menu_la::g_hiddenNext = true;
+    const Result rc = daemon::menu_la::launch(smi::MenuStartMode::MainMenu, status);
+    daemon::menu_la::g_hiddenNext = false;
+    if (R_FAILED(rc)) {
+        switchu::FileLog::logCommit("[standby] start failed rc=0x%X", rc);
+        return;
+    }
+    g_standbyActive = true;
+    for (int i = 0; i < 150 && g_menuReadyCount == base && daemon::menu_la::isActive(); ++i) {
+        svcSleepThread(20'000'000ULL);
+        drainMenuCommands();
+    }
+    switchu::FileLog::logCommit("[standby] HOME is waiting behind the game (ready=%d)", g_menuReadyCount != base ? 1 : 0);
+}
+
+// HOME comes to the front. False if there is no standby HOME to bring.
+static bool wakeStandby(const char* why) {
+    if (!g_standbyActive || !daemon::menu_la::isActive()) {
+        g_standbyActive = false;
+        return false;
+    }
+    g_standbyActive = false;
+    g_standbyWakeAt = nowNs();
+    g_standbyReadyBase = g_menuReadyCount;
+    switchu::FileLog::logCommit("[standby] waking HOME (%s)", why);
+    pushNotification(smi::MenuMessage::ApplicationSuspended, daemon::app::suspendedTitleId());
+    pushNotification(smi::MenuMessage::StandbyWake);
+    return true;
+}
+
 // LiteNX tells the daemon when it is up. If HOME's process was started and never says so, it is restarted once:
 // a start that stalls then doesn't leave the screen on the game's last frame. (Only for LiteNX: the other
 // frontends don't send the message.)
@@ -2207,6 +2277,16 @@ static void watchMenuStart() {
 }
 
 static void mainLoop() {
+    if (g_standbyWakeAt) { // HOME was told to come forward: if it never says it has the screen, start a fresh one
+        if (g_menuReadyCount > g_standbyReadyBase) {
+            g_standbyWakeAt = 0;
+        } else if (nowNs() - g_standbyWakeAt > 3'000'000'000ULL) {
+            g_standbyWakeAt = 0;
+            switchu::FileLog::logCommit("[standby] HOME never took the screen in 3 s; starting a fresh one");
+            daemon::menu_la::terminateWithin(2'000'000'000ULL);
+            daemon::menu_la::launch(smi::MenuStartMode::MainMenu, buildSystemStatus());
+        }
+    }
     watchMenuStart();
     for (int i = 0; i < 16 && handleGeneralChannel(); ++i) {}
     for (int i = 0; i < 16 && handleAppletMessages(); ++i) {}
@@ -2303,8 +2383,11 @@ static void mainLoop() {
         switchu::FileLog::log("[main] menu exited (reason=%d runtime=%lums)",
             (int)daemon::menu_la::exitReason(),
             static_cast<unsigned long>(runtimeNs / 1'000'000ULL));
+        g_standbyActive = false; // (the menu that was there is gone)
+        g_standbyWakeAt = 0;
         if (g_launchForegroundPending) {
             g_launchForegroundPending = false;
+            startStandby();
             Result fgRc = daemon::app::resume();
             // AM can still be taking the screen back from the menu that just
             // closed; a refusal then used to open HOME instead of the game.
@@ -2379,6 +2462,7 @@ static void mainLoop() {
             g_pendingHomeMenuStartedAt = 0;
         }
         if (daemon::menu_la::isActive()) {
+            wakeStandby("the game closed"); // (a hidden HOME has to come forward)
             pushNotification(smi::MenuMessage::ApplicationExited);
         } else if (homebrewDiedEarly) {
             fallBackToAlbum("exited early");
