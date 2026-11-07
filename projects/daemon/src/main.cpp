@@ -982,6 +982,16 @@ static void startSleepSequence(const char* source) {
     }
     switchu::FileLog::logCommit("[power] sleep requested source=%s menuActive=%d",
                                 source, daemon::menu_la::isActive() ? 1 : 0);
+    // With a game on screen there is no HOME to tell, nothing for the SD card to wait on and nothing to draw: the
+    // sleep is started the way the stock HOME starts it, with none of the extra steps. The freezes only ever came
+    // after sleeps that had all of them.
+    if (!daemon::menu_la::isActive()) {
+        switchu::FileLog::logCommit("[power] game on screen: plain sleep, no extra steps");
+        const Result plainRc = appletStartSleepSequence(true);
+        g_sleepReturnedAt = nowNs();
+        switchu::FileLog::logCommit("[power] sleep sequence returned rc=0x%X", plainRc);
+        return;
+    }
     pushNotification(smi::MenuMessage::SleepSequence);
     switchu::FileLog::logCommit("[power] menu told; committing the SD card");
     // Preserve the final state even if the sleep ends in a forced power loss.
