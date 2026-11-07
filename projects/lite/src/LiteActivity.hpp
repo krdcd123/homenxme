@@ -39,7 +39,7 @@ class LiteActivity final : public nxui::Activity {
 public:
     // What the daemon said at start: a game suspended, one running, the console just booted.
     explicit LiteActivity(std::uint64_t suspendedId = 0, bool appRunning = false, bool atBoot = true,
-                          bool appletReturn = false);
+                          bool appletReturn = false, bool hiddenStart = false);
     bool onCreate() override;
     bool presentInitialFrame(nxui::Renderer& ren) override;
     void onDestroy() override;
@@ -274,6 +274,9 @@ private:
     std::atomic<bool> m_animDone{false};
     std::future<void> m_animReadJob;
     bool m_appletReturn = false;                         // back from the Album or the controller screen: not from a game
+    bool m_hiddenStart = false;  // started hidden: asks for the screen itself
+    bool m_gotFocus = false;
+    float m_nextAsk = 0.f;
     bool m_readySent = false;
     bool m_chimeWanted = false;                          // HOME came back from a game: a small sound
     std::vector<std::unique_ptr<nxui::Texture>> m_animBlur;

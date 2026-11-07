@@ -351,7 +351,8 @@ int main(int argc, char* argv[]) {
         if (homeStyle.rfind("cards-lite", 0) == 0)
             app.setActivity(std::make_unique<lite::LiteActivity>(sysStatus.suspended_app_id, sysStatus.app_running,
                 startMode == switchu::smi::MenuStartMode::StartupBoot,
-                startMode == switchu::smi::MenuStartMode::AppletReturn));
+                startMode == switchu::smi::MenuStartMode::AppletReturn,
+                sysStatus._pad[0] != 0));
         else if (homeStyle.rfind("cards", 0) == 0)
             app.setActivity(std::make_unique<cards::CardsActivity>(sysStatus.suspended_app_id, sysStatus.app_running,
                 startMode == switchu::smi::MenuStartMode::StartupBoot));

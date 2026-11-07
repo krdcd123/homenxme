@@ -51,13 +51,17 @@ inline Event* commandEvent() {
     return g_commandEventAvailable ? &g_holder.PopInteractiveOutDataEvent : nullptr;
 }
 
+// HomeNX: the next menu is created hidden and asks for the screen itself (LiteNX); set per start.
+inline bool g_hiddenNext = false;
+
 inline Result create() {
     const uint64_t startedAt = armGetSystemTick();
     switchu::FileLog::log("[menu_la] create begin active=%d holderActive=%d",
                           g_active ? 1 : 0,
                           (g_active && appletHolderActive(&g_holder)) ? 1 : 0);
-    Result rc = appletCreateLibraryApplet(&g_holder,
-        kMenuAppletId, LibAppletMode_AllForeground);
+    Result rc = appletCreateLibraryApplet(&g_holder, kMenuAppletId,
+        g_hiddenNext ? LibAppletMode_AllForegroundInitiallyHidden : LibAppletMode_AllForeground);
+    switchu::FileLog::log("[menu_la] create mode=%s", g_hiddenNext ? "hidden, menu asks for the screen" : "foreground");
     if (R_FAILED(rc)) {
         switchu::FileLog::log("[menu_la] CreateLibApplet id=0x%X FAIL: 0x%X",
                               (u32)kMenuAppletId, rc);
@@ -133,7 +137,9 @@ inline Result prepare() {
     return rc;
 }
 
-inline Result startPrepared(smi::MenuStartMode mode, const smi::SystemStatus& status) {
+inline Result startPrepared(smi::MenuStartMode mode, const smi::SystemStatus& statusIn) {
+    smi::SystemStatus status = statusIn;
+    status._pad[0] = g_hiddenNext ? 1 : 0; // (tells the menu it must ask for the screen)
     if (!g_holderCreated) {
         Result rc = prepare();
         if (R_FAILED(rc))

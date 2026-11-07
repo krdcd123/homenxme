@@ -53,8 +53,9 @@ bool parseUid(const std::string& hex, cards::AccountUidLike& out) {
 constexpr const char* kRecentPath = "sdmc:/config/LiteNX/recent.tsv";
 } // namespace
 
-LiteActivity::LiteActivity(std::uint64_t suspendedId, bool appRunning, bool atBoot, bool appletReturn)
-    : m_startSuspended(suspendedId), m_startRunning(appRunning), m_atBoot(atBoot), m_appletReturn(appletReturn) {}
+LiteActivity::LiteActivity(std::uint64_t suspendedId, bool appRunning, bool atBoot, bool appletReturn, bool hiddenStart)
+    : m_startSuspended(suspendedId), m_startRunning(appRunning), m_atBoot(atBoot), m_appletReturn(appletReturn),
+      m_hiddenStart(hiddenStart) {}
 
 // ---------------------------------------------------------------- start and stop
 
@@ -1082,7 +1083,17 @@ void LiteActivity::onUpdate(float dt) {
                    || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
     }
 
-    if (!m_readySent && m_time > 0.15f) { // (the daemon restarts HOME if it never hears this)
+    if (m_hiddenStart && !m_gotFocus) { // started hidden: ask for the screen until it is ours
+        if (appletGetFocusState() == AppletFocusState_InFocus) {
+            m_gotFocus = true;
+            switchu::FileLog::log("[lite] hidden start: the screen is ours (%.2f s)", m_time);
+        } else if (m_time >= m_nextAsk) {
+            const Result rc = appletRequestToGetForeground();
+            switchu::FileLog::log("[lite] hidden start: asked for the screen rc=0x%X", rc);
+            m_nextAsk = m_time + 0.25f;
+        }
+    }
+    if (!m_readySent && m_time > 0.15f && (!m_hiddenStart || m_gotFocus)) { // (the daemon restarts HOME if it never hears this)
         m_readySent = true;
         switchu::menu::smi_cmd::menuReady();
     }

@@ -892,8 +892,14 @@ static Result launchPendingHomeMenu() {
     switchu::FileLog::log(
         "[%s] HOME foreground acquired; launching MainMenu status.running=%d suspended=0x%016lX",
         source, status.app_running ? 1 : 0, status.suspended_app_id);
+    // LiteNX: over a game, HOME is created hidden and asks for the screen itself, so the console's own
+    // switch-over (where the freezes are) is left out. An empty no_hidden_start file turns it off.
+    std::error_code hideEc;
+    daemon::menu_la::g_hiddenNext = status.app_running && frontend.rfind("cards-lite", 0) == 0
+        && !std::filesystem::exists("sdmc:/config/SwitchU/no_hidden_start", hideEc);
     const uint64_t launchStartedAt = armGetSystemTick();
     const Result rc = daemon::menu_la::launch(smi::MenuStartMode::MainMenu, status);
+    daemon::menu_la::g_hiddenNext = false;
     const uint64_t launchDoneAt = armGetSystemTick();
     switchu::FileLog::log(
         "[%s] HOME MainMenu launch rc=0x%X foreground_wait=%lums launch=%lums total=%lums",
