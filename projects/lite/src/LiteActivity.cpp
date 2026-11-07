@@ -11,6 +11,7 @@
 #include <nxui/core/Renderer.hpp>
 #include <nxui/third_party/stb/stb_image.h>
 #include <nxui/widgets/Widget.hpp>
+#include <switchu/control_cache.hpp>
 #include <switchu/lock_picture.hpp>
 #include <switchu/ns_ext.hpp>
 #include <switchu/smi_protocol.hpp>
@@ -52,8 +53,8 @@ bool parseUid(const std::string& hex, cards::AccountUidLike& out) {
 constexpr const char* kRecentPath = "sdmc:/config/LiteNX/recent.tsv";
 } // namespace
 
-LiteActivity::LiteActivity(std::uint64_t suspendedId, bool appRunning, bool atBoot)
-    : m_startSuspended(suspendedId), m_startRunning(appRunning), m_atBoot(atBoot) {}
+LiteActivity::LiteActivity(std::uint64_t suspendedId, bool appRunning, bool atBoot, bool appletReturn)
+    : m_startSuspended(suspendedId), m_startRunning(appRunning), m_atBoot(atBoot), m_appletReturn(appletReturn) {}
 
 // ---------------------------------------------------------------- start and stop
 
@@ -166,7 +167,8 @@ bool LiteActivity::onCreate() {
     m_painter = std::make_shared<Painter>([this](nxui::Renderer& r) { draw(r); });
     rootBox().addChild(m_painter);
 
-    if (m_startSuspended || m_startRunning) m_introFor = 0.35f; // back from a game: quicker
+    if (m_startSuspended || m_startRunning) { m_introFor = 0.35f; m_chimeWanted = !m_appletReturn; } // back from a game: quicker, with a chime
+    if (m_settings.animBg && !m_gpuSlow) loadAnimBackground(); // (the pictures are read at once, behind everything else)
     m_intro = m_settings.motion ? 0.f : 1.f;
 
     rebuildList();
@@ -206,7 +208,7 @@ bool LiteActivity::onCreate() {
 }
 
 bool LiteActivity::presentInitialFrame(nxui::Renderer& ren) {
-    if (!m_startSuspended) return false;
+    if (!m_startSuspended || m_appletReturn) return false; // (the game's last picture is for HOME pressed in a game, not for the Album)
     std::vector<std::uint8_t> px(1280u * 720u * 4u);
     bool ok = false;
     if (R_FAILED(appletGetLastApplicationCaptureImageEx(px.data(), px.size(), &ok)) || !ok) return false;
@@ -224,7 +226,9 @@ void LiteActivity::onDestroy() {
     m_cv.notify_all();
     for (std::thread& t : m_threads)
         if (t.joinable()) t.join();
+    if (m_animReadJob.valid()) m_animReadJob.wait();
     if (m_listJob.valid()) m_listJob.wait();
+    if (m_deleteJob.valid()) m_deleteJob.wait();
     if (m_changesJob.valid()) m_changesJob.wait();
     if (m_statsJob.valid()) m_statsJob.wait();
     if (m_animJob.valid()) m_animJob.wait();
@@ -440,7 +444,7 @@ void LiteActivity::openAllSoftware(bool on) {
     if (on) m_gridT = 0.f;                    // the tiles come together
     else m_intro = std::min(m_intro, 0.35f); // the row's cards rise back in
     m_iconWantSel = ~0ull;
-    m_audio.play(on ? "navigation" : "hide_modal");
+    m_audio.play(on ? "tab_transition" : "hide_modal");
     wantIcons();
 }
 
@@ -1080,11 +1084,12 @@ void LiteActivity::onUpdate(float dt) {
 
     // What the first frame doesn't need starts later, so HOME coming back from a game doesn't hitch on it.
     if (m_startStage < 3) {
-        if (m_startStage < 2 && m_time > 1.5f) {
+        if (m_startStage < 2 && (m_time > 1.5f || (m_chimeWanted && m_time > 0.08f))) {
             m_startStage = 2;
             m_audio.start();
             m_audio.setSounds(m_settings.sounds, m_settings.soundVolume);
             m_audio.setMusic(false, 0); // the stock HOME has no music
+            if (m_chimeWanted) { m_audio.play("activation"); m_chimeWanted = false; }
         } else if (m_startStage == 2 && m_time > 1.6f) {
             m_startStage = 3;
         }
@@ -1145,6 +1150,30 @@ void LiteActivity::onUpdate(float dt) {
     m_scroll = motion ? m_scroll + (target - m_scroll) * (1.f - std::exp(-dt * 13.f)) : target;
     if (std::abs(m_scroll - target) < 0.001f) m_scroll = target;
     if (m_messageFor > 0.f) m_messageFor -= dt;
+
+    // A game was uninstalled (or wasn't).
+    if (m_deleteJob.valid() && m_deleteJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        const std::uint32_t rc = m_deleteJob.get();
+        if (R_SUCCEEDED(rc)) {
+            switchu::control_cache::remove(m_deleteId);
+            const std::uint64_t id = m_deleteId;
+            auto gone = [id](const Game& x) { return x.id == id; };
+            m_games.erase(std::remove_if(m_games.begin(), m_games.end(), gone), m_games.end());
+            m_homebrew.erase(std::remove_if(m_homebrew.begin(), m_homebrew.end(), gone), m_homebrew.end());
+            rebuildList();
+            m_sel = std::clamp(m_sel, 0, std::max(0, static_cast<int>(m_list.size()) - 1));
+            m_scroll = scrollTarget();
+            m_iconWantSel = ~0ull;
+            cards::saveLists(m_games, m_homebrew);
+            m_audio.play("toggle_off");
+            say(m_deleteName + " was uninstalled.");
+            wantIcons();
+        } else {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "0x%X", rc);
+            say("Couldn't uninstall " + m_deleteName + " (" + buf + ").");
+        }
+    }
 
     // The real lists arrived (not while something is launching).
     if (m_listJob.valid() && !m_leaving && m_listJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {

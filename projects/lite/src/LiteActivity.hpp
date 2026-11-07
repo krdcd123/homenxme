@@ -38,7 +38,8 @@ using cards::Game;
 class LiteActivity final : public nxui::Activity {
 public:
     // What the daemon said at start: a game suspended, one running, the console just booted.
-    explicit LiteActivity(std::uint64_t suspendedId = 0, bool appRunning = false, bool atBoot = true);
+    explicit LiteActivity(std::uint64_t suspendedId = 0, bool appRunning = false, bool atBoot = true,
+                          bool appletReturn = false);
     bool onCreate() override;
     bool presentInitialFrame(nxui::Renderer& ren) override;
     void onDestroy() override;
@@ -232,6 +233,9 @@ private:
     float m_repeat = 0.f;
     float m_rebuildIn = 1.f;
     std::future<Lists> m_listJob;
+    std::future<std::uint32_t> m_deleteJob; // a game being uninstalled (its Result)
+    std::uint64_t m_deleteId = 0;
+    std::string m_deleteName;
     float m_gamesChangedIn = 0.f;
     float m_changesIn = 10.f;
     std::future<std::pair<int, std::uint64_t>> m_changesJob;
@@ -265,7 +269,12 @@ private:
     // animated background
     bool m_animTried = false;
     std::vector<std::string> m_animPaths, m_animBlurPaths;
-    std::vector<std::vector<std::uint8_t>> m_animJpegs;
+    std::vector<std::vector<std::uint8_t>> m_animJpegs; // (sized once; a thread fills them in order)
+    std::atomic<std::size_t> m_animReady{0};            // how many are read
+    std::atomic<bool> m_animDone{false};
+    std::future<void> m_animReadJob;
+    bool m_appletReturn = false;                         // back from the Album or the controller screen: not from a game
+    bool m_chimeWanted = false;                          // HOME came back from a game: a small sound
     std::vector<std::unique_ptr<nxui::Texture>> m_animBlur;
     std::size_t m_animBlurStep = 1, m_animCur = 0;
     float m_animFps = 10.f;

@@ -177,47 +177,61 @@ void LiteActivity::loadAnimBackground() {
     std::getline(std::ifstream(dir + "/fps.txt"), rate);
     const float fps = rate.empty() ? 0.f : static_cast<float>(std::atof(rate.c_str()));
     if (fps >= 1.f && fps <= 60.f) m_animFps = fps;
+    // All the pictures are read now, on a thread, in order: the animation plays from the first frame while they come in.
+    m_animJpegs.assign(m_animPaths.size(), {});
+    m_animReady = 0;
+    m_animDone = false;
+    const std::vector<std::string> paths = m_animPaths;
+    m_animReadJob = std::async(std::launch::async, [this, paths]() {
+        offScreenCore();
+        for (const std::string& path : paths) {
+            if (m_quit) break;
+            std::ifstream in(path, std::ios::binary | std::ios::ate);
+            std::vector<std::uint8_t> data;
+            if (in) {
+                const std::streamoff size = in.tellg();
+                if (size > 0 && size < (8 << 20)) {
+                    data.resize(static_cast<std::size_t>(size));
+                    in.seekg(0);
+                    if (!in.read(reinterpret_cast<char*>(data.data()), size)) data.clear();
+                }
+            }
+            if (data.empty()) continue;
+            const std::size_t at = m_animReady.load(std::memory_order_relaxed);
+            m_animJpegs[at] = std::move(data);
+            m_animReady.store(at + 1, std::memory_order_release);
+        }
+        m_animDone = true;
+        cards::threadDone();
+    });
 }
 
 bool LiteActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& screen) {
     if (!m_settings.animBg || m_gpuSlow) return false;
     if (!m_animTried) loadAnimBackground();
     if (m_animPaths.empty()) return false;
-    // The files are read into RAM one a frame (JPEGs, ~0.2 MB each); nothing is uploaded until all are in.
-    if (m_animJpegs.size() < m_animPaths.size()) {
-        std::ifstream in(m_animPaths[m_animJpegs.size()], std::ios::binary | std::ios::ate);
-        std::vector<std::uint8_t> data;
-        if (in) {
-            const std::streamoff size = in.tellg();
-            if (size > 0 && size < (8 << 20)) {
-                data.resize(static_cast<std::size_t>(size));
-                in.seekg(0);
-                if (!in.read(reinterpret_cast<char*>(data.data()), size)) data.clear();
+    if (m_animJpegs.empty()) return false;
+    // The first picture goes up at once (HOME never shows the plain gradient); the rest are read behind it.
+    for (int spin = 0; spin < 60 && m_animReady.load(std::memory_order_acquire) == 0 && !m_animDone; ++spin)
+        svcSleepThread(2'500'000ULL);
+    const std::size_t ready = m_animReady.load(std::memory_order_acquire);
+    if (ready == 0) return false;
+    if (!m_animTex) {
+        int w = 0, h = 0;
+        if (stbi_uc* p = cards::decodePicture(m_animJpegs[0].data(), static_cast<int>(m_animJpegs[0].size()), w, h)) {
+            auto tex = std::make_unique<nxui::Texture>();
+            nxui::GpuDevice::EssentialScope essential;
+            if (tex->loadFromPixels(app().gpu(), app().renderer(), p, w, h)) {
+                m_animTex = std::move(tex);
+                m_animTexIdx = 0;
             }
-        }
-        if (data.empty()) m_animPaths.erase(m_animPaths.begin() + static_cast<std::ptrdiff_t>(m_animJpegs.size()));
-        else m_animJpegs.push_back(std::move(data));
-        if (m_animJpegs.size() == 1 && !m_animTex) { // the first picture goes up at once: HOME never shows the plain gradient
-            int w = 0, h = 0;
-            if (stbi_uc* p = cards::decodePicture(m_animJpegs[0].data(), static_cast<int>(m_animJpegs[0].size()), w, h)) {
-                auto tex = std::make_unique<nxui::Texture>();
-                nxui::GpuDevice::EssentialScope essential;
-                if (tex->loadFromPixels(app().gpu(), app().renderer(), p, w, h)) {
-                    m_animTex = std::move(tex);
-                    m_animTexIdx = 0;
-                }
-                stbi_image_free(p);
-            }
-        }
-        if (m_animJpegs.size() < m_animPaths.size() || m_animJpegs.empty()) { // (the rest are read, a file a frame)
-            if (!m_animTex || !m_animTex->valid()) return false;
-            drawCover(r, m_animTex.get(), screen, 0.f, kWhite);
-            return true;
+            stbi_image_free(p);
         }
     }
-    const std::size_t n = m_animJpegs.size();
+    // The whole sequence plays from the first moment: a frame that isn't read yet waits on the last one that is.
+    const std::size_t n = m_animDone ? ready : m_animJpegs.size();
     if (n == 0) return false;
-    const std::size_t idx = static_cast<std::size_t>(m_time * m_animFps) % n;
+    const std::size_t idx = std::min(static_cast<std::size_t>(m_time * m_animFps) % n, ready - 1);
     // The small blurred copies (the glass): a few, one a frame.
     if (m_animBlur.size() < m_animBlurPaths.size()) {
         auto tex = std::make_unique<nxui::Texture>();
@@ -244,7 +258,8 @@ bool LiteActivity::drawAnimBackground(nxui::Renderer& r, const nxui::Rect& scree
         m_animNextIdx = -1;
     }
     // What to decode next: the frame that's wanted now if it isn't up, else the one after it.
-    const int want = m_animTexIdx == static_cast<int>(idx) ? static_cast<int>((idx + 1) % n) : static_cast<int>(idx);
+    int want = m_animTexIdx == static_cast<int>(idx) ? static_cast<int>((idx + 1) % n) : static_cast<int>(idx);
+    if (want >= static_cast<int>(ready)) want = static_cast<int>(idx);
     if (!m_animJob.valid() && m_animNextIdx != want && m_animTexIdx != want) {
         m_animJobIdx = want;
         // (the pictures are all in before the first decode and never change: no copy of the JPEG, none of the pixels)
@@ -334,9 +349,15 @@ void LiteActivity::drawCard(nxui::Renderer& r, const nxui::Rect& card, const Gam
     }
     if (t < 0.5f) // the ones beside the chosen one sit a little dimmer
         r.drawRoundedRect(card, nxui::Color(0.f, 0.f, 0.f, 0.18f * (1.f - t) * alpha), rad);
-    if (t > 0.01f) { // the frame: a bright outer line and a white inner one, pulsing a little
-        const float ring = focusedRow ? 0.85f + 0.15f * std::sin(m_beat * 4.f) : 0.55f;
-        r.drawRoundedRectOutline({card.x - 5.f, card.y - 5.f, card.width + 10.f, card.height + 10.f}, accent(ring * t * alpha), rad + 5.f, 4.5f);
+    if (t > 0.01f) { // the frame: the stock HOME's pale blue, a white line inside it and a soft glow round it
+        const float ring = focusedRow ? 0.9f + 0.1f * std::sin(m_beat * 4.f) : 0.6f;
+        const nxui::Color blue(0.43f, 0.67f, 0.93f, 1.f);
+        for (int i = 3; i >= 1; --i) { // the glow: wider, fainter lines outside the frame
+            const float o = 5.f + 4.f * static_cast<float>(i);
+            r.drawRoundedRectOutline({card.x - o, card.y - o, card.width + 2.f * o, card.height + 2.f * o},
+                                     blue.withAlpha(0.07f * (4 - i) * ring * t * alpha), rad + o, 5.f);
+        }
+        r.drawRoundedRectOutline({card.x - 5.f, card.y - 5.f, card.width + 10.f, card.height + 10.f}, blue.withAlpha(ring * t * alpha), rad + 5.f, 4.5f);
         r.drawRoundedRectOutline(card, kWhite.withAlpha(0.85f * t * alpha), rad, 2.f);
     }
 }
@@ -350,12 +371,12 @@ void LiteActivity::drawStatus(nxui::Renderer& r, float a, float hy, bool withClo
     const int charge = m_battery.empty() ? -1 : std::atoi(m_battery.c_str());
     x -= 14.f + 36.f;
     switchu::battery_drawing::drawBattery(r, {x, hy - 10.f, 36.f, 20.f}, charge, m_charging, a);
-    x -= 16.f + 26.f;
+    x -= 16.f + 34.f;
     if (m_quick.airplane) {
-        icon(r, "airplane", x + 13.f, hy, 26.f, kWhite.withAlpha(a));
+        icon(r, "airplane", x + 17.f, hy, 34.f, kWhite.withAlpha(a));
     } else {
-        icon(r, "wifi", x + 13.f, hy, 26.f, kWhite.withAlpha((m_online ? 1.f : 0.4f) * a));
-        if (!m_online) r.drawLine({x + 2.f, hy + 11.f}, {x + 24.f, hy - 11.f}, kWhite.withAlpha(0.7f * a), 2.5f);
+        icon(r, "wifi", x + 17.f, hy, 34.f, kWhite.withAlpha((m_online ? 1.f : 0.4f) * a));
+        if (!m_online) r.drawLine({x + 3.f, hy + 14.f}, {x + 31.f, hy - 14.f}, kWhite.withAlpha(0.7f * a), 2.5f);
     }
     if (!withClock) return;
     x -= 22.f + measured(m_fPill, m_clock).x;
@@ -584,6 +605,26 @@ void LiteActivity::openOptions() {
                              m_launcher.terminateApplication();
                              say("Closing it...");
                          }, nullptr, nullptr, true, false});
+    if (g.path.empty() && g.action.empty() && g.id) { // an installed game or a forwarder: removed from the console
+        const std::uint64_t id = g.id;
+        const std::string name = g.name;
+        items.push_back({"Uninstall", [this, id, name, running]() {
+                             if (running) { say("Close " + name + " first."); return; }
+                             std::vector<Item> sure;
+                             sure.push_back({"Uninstall it from the console", [this, id, name]() {
+                                                 if (m_deleteJob.valid()) { say("Still uninstalling " + m_deleteName + "..."); return; }
+                                                 m_deleteId = id;
+                                                 m_deleteName = name;
+                                                 say("Uninstalling " + name + "...");
+                                                 m_deleteJob = std::async(std::launch::async, [id]() {
+                                                     offScreenCore();
+                                                     return static_cast<std::uint32_t>(nsDeleteApplicationCompletely(id));
+                                                 });
+                                             }, nullptr, nullptr, true, false});
+                             sure.push_back({"Cancel", [] {}, nullptr, nullptr, false, false});
+                             openMenu("Uninstall " + name + "?", std::move(sure));
+                         }, nullptr, nullptr, true, false});
+    }
     items.push_back({"Cancel", [] {}, nullptr, nullptr, false, false});
     openMenu(g.name, std::move(items));
 }
