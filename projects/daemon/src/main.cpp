@@ -962,6 +962,7 @@ static void requestPowerStateChange(const char* source, bool reboot) {
 static u64 g_sleepReturnedAt = 0;   // armTicksToNs when the last sleep call returned
 static u64 g_lastCommitAt = 0;
 static u64 g_lastWakeAt = 0;
+static bool g_gameKeptScreenAtSleep = false; // the game had the screen when the console went to sleep
 static bool g_menuReadySeen = false;   // the menu has said it is up (LiteNX does)
 static int g_menuStartRetries = 0;       // nowNs() at the last Wakeup message
 static u64 nowNs() { return armTicksToNs(armGetSystemTick()); }
@@ -1275,7 +1276,11 @@ static bool handleAppletMessages() {
         // The application keeps its IApplicationAccessor across system sleep,
         // but must reacquire the foreground after wake. Keep our session state
         // in sync so the Wakeup path is allowed to call app::resume().
-        daemon::app::onHomeSuspend();
+        // If the game itself has the screen (HOME isn't up), the console puts it to sleep and gives it the screen back
+        // on its own. Marking it suspended here and asking for the foreground again at the wake was the one extra
+        // step before HOME's start froze (several times, after a wake), so the game is left alone.
+        g_gameKeptScreenAtSleep = daemon::app::isRunning() && daemon::app::hasForeground() && !daemon::menu_la::isActive();
+        if (!g_gameKeptScreenAtSleep) daemon::app::onHomeSuspend();
         // A stale duplicate from rapid power presses lands the instant the
         // previous sleep returns; sleeping again for it is a spurious cycle.
         if (g_sleepReturnedAt != 0 && nowNs() - g_sleepReturnedAt < 300'000'000ULL) {
@@ -1295,7 +1300,12 @@ static bool handleAppletMessages() {
         // the lock screen up before its first visible frame.
         if (daemon::menu_la::isActive())
             pushNotification(smi::MenuMessage::WakeUp);
-        if (daemon::app::isRunning() && !daemon::menu_la::isActive()) {
+        const bool oldWake = [] { std::FILE* f = std::fopen("sdmc:/config/SwitchU/resume_on_wake", "rb"); if (f) std::fclose(f); return f != nullptr; }();
+        if (g_gameKeptScreenAtSleep && !oldWake && daemon::app::isRunning() && !daemon::menu_la::isActive()) {
+            g_gameKeptScreenAtSleep = false;
+            switchu::FileLog::logCommit("[ae] wake: the game kept the screen; no resume asked for");
+        } else if (daemon::app::isRunning() && !daemon::menu_la::isActive()) {
+            g_gameKeptScreenAtSleep = false;
             Result rc = daemon::app::resume();
             if (R_FAILED(rc)) {
                 switchu::FileLog::log("[ae] wake resume FAIL: 0x%X", rc);
