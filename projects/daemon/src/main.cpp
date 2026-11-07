@@ -2170,10 +2170,10 @@ static void watchMenuStart() {
     if (!act) activeSince = 0;
     prevActive = act;
     if (!act || lite != 1 || g_menuReadySeen || activeSince == 0) return;
-    if (nowNs() - activeSince < 9'000'000'000ULL) return;
+    if (nowNs() - activeSince < 5'000'000'000ULL) return;
     if (g_menuStartRetries >= 1) return;
     ++g_menuStartRetries;
-    switchu::FileLog::logCommit("[menu] HOME never said it was up after 9 s; starting it again");
+    switchu::FileLog::logCommit("[menu] HOME never said it was up after 5 s; starting it again");
     daemon::menu_la::terminateWithin(2'000'000'000ULL);
     const Result rc = daemon::menu_la::launch(smi::MenuStartMode::MainMenu, buildSystemStatus());
     switchu::FileLog::logCommit("[menu] second start rc=0x%X", rc);
