@@ -1012,12 +1012,14 @@ static void startSleepSequence(const char* source) {
     // sleep is started the way the stock HOME starts it, with none of the extra steps. The freezes only ever came
     // after sleeps that had all of them.
     if (!menuOnScreen()) {
-        if (g_standbyActive) { // the console did not wake with a HOME waiting behind the game, so it goes first
+        std::error_code closeEc; // (an empty standby_close_on_sleep file brings back closing it first)
+        if (g_standbyActive && std::filesystem::exists("sdmc:/config/SwitchU/standby_close_on_sleep", closeEc)) { // the console did not wake with a HOME waiting behind the game, so it goes first
             g_standbyActive = false;
             g_standbyWakeAt = 0;
             switchu::FileLog::logCommit("[standby] closing the waiting HOME before sleep");
             daemon::menu_la::terminateWithin(2'000'000'000ULL);
         }
+        if (g_standbyActive) switchu::FileLog::logCommit("[standby] sleeping with HOME waiting behind the game");
         switchu::FileLog::logCommit("[power] game on screen: plain sleep, no extra steps");
         const Result plainRc = appletStartSleepSequence(true);
         g_sleepReturnedAt = nowNs();
