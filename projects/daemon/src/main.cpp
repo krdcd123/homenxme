@@ -961,6 +961,7 @@ static void requestPowerStateChange(const char* source, bool reboot) {
 // whole sleep, which is what flattened the battery in sleep mode.
 static u64 g_sleepReturnedAt = 0;   // armTicksToNs when the last sleep call returned
 static u64 g_lastCommitAt = 0;
+static u64 g_lastWakeAt = 0;       // nowNs() at the last Wakeup message
 static u64 nowNs() { return armTicksToNs(armGetSystemTick()); }
 
 static void startSleepSequence(const char* source) {
@@ -1058,6 +1059,17 @@ static void startPowerSequence(const char* source, smi::SystemMessage action) {
 }
 
 static void openMenuFromHome(const char* source) {
+    // Starting HOME's process in the first moments after a wake is where the console has frozen outright (HOME
+    // never logged a start, the power button was dead): give the system, the SD card most of all, a few seconds.
+    if (g_lastWakeAt != 0) {
+        constexpr u64 kWakeSettleNs = 3'500'000'000ULL;
+        const u64 since = nowNs() - g_lastWakeAt;
+        if (since < kWakeSettleNs) {
+            switchu::FileLog::logCommit("[%s] HOME %llu ms after a wake; letting the system settle", source,
+                                        (unsigned long long)(since / 1'000'000ULL));
+            svcSleepThread(static_cast<s64>(kWakeSettleNs - since));
+        }
+    }
     const uint64_t homeStartedAt = armGetSystemTick();
     logHomeState(source, "request");
     cancelViewPolling("home");
@@ -1275,6 +1287,7 @@ static bool handleAppletMessages() {
 
         case 26:
         switchu::FileLog::log("[ae] -> Wakeup");
+        g_lastWakeAt = nowNs();
         g_batteryRefreshPending.store(true);
         // Deliver wake before requesting the menu foreground, so it can put
         // the lock screen up before its first visible frame.
