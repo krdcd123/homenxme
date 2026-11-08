@@ -275,6 +275,7 @@ static int g_standbyReadyBase = 0;
 // The menu is on the screen (a standby one is running but hidden).
 static bool menuOnScreen() { return daemon::menu_la::isActive() && !g_standbyActive; }
 static bool wakeStandby(const char* why);
+static void startStandby();
 static bool handleAction(daemon::SystemAction& action);
 static void openMenuFromHome(const char* source);
 // Locking with a HOME waiting behind a game: HOME is brought forward first and the console sleeps from there.
@@ -2034,8 +2035,22 @@ static bool handleMenuCommand() {
             }
             switchu::FileLog::logCommit("[standby] game takes the screen rc=0x%X", fgRc);
         } else if (!g_actionQueue.empty()) { // (the resume that came with it)
+            // (handleAction refuses while the menu holds its slot, which dropped this and left a black screen)
             daemon::SystemAction action{};
-            if (g_actionQueue.pop(action)) handleAction(action);
+            if (g_actionQueue.pop(action)) {
+                if (action.type == daemon::SystemActionType::ResumeApplication) {
+                    fgRc = daemon::app::resume();
+                    for (int i = 0; R_FAILED(fgRc) && i < 6 && daemon::app::isRunning(); ++i) {
+                        svcSleepThread(40'000'000ULL);
+                        fgRc = daemon::app::resume();
+                    }
+                    switchu::FileLog::logCommit("[standby] resume: game takes the screen rc=0x%X", fgRc);
+                    recordOperationResult(action.requestId, smi::SystemMessage::ResumeApplication, fgRc,
+                                          daemon::app::suspendedTitleId());
+                } else {
+                    switchu::FileLog::logCommit("[standby] unexpected action type=%u dropped", (u32)action.type);
+                }
+            }
         }
         if (R_FAILED(fgRc)) wakeStandby("the game would not take the screen");
         g_menuFastExitCount = 0;
@@ -2105,6 +2120,7 @@ static bool handleAction(daemon::SystemAction& action) {
         }
 
         case daemon::SystemActionType::ResumeApplication: {
+            startStandby();
             switchu::FileLog::log("[action] resume: calling app::resume()");
             Result rc = daemon::app::resume();
             switchu::FileLog::log("[action] resume: app::resume() -> 0x%X", rc);
@@ -2265,7 +2281,7 @@ static void drainMenuCommands();
 
 // Start HOME hidden, now, before the game takes the screen (the game is still behind: this is when process
 // creation has been safe), and wait for it to say it is up.
-[[maybe_unused]] static void startStandby() {
+static void startStandby() {
     if (g_standbyActive || !standbyWanted()) return;
     const int base = g_menuReadyCount;
     auto status = buildSystemStatus();
@@ -2443,6 +2459,7 @@ static void mainLoop() {
         g_standbyWakeAt = 0;
         if (g_launchForegroundPending) {
             g_launchForegroundPending = false;
+            startStandby(); // (a title HOME didn't stay open for: forwarders)
             Result fgRc = daemon::app::resume();
             // AM can still be taking the screen back from the menu that just
             // closed; a refusal then used to open HOME instead of the game.
