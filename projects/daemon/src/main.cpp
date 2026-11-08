@@ -276,7 +276,6 @@ static int g_standbyReadyBase = 0;
 static bool menuOnScreen() { return daemon::menu_la::isActive() && !g_standbyActive; }
 static bool wakeStandby(const char* why);
 static void startStandby();
-static u64 g_standbyLateAt = 0; // a forwarder is loading: HOME waits until it has (creating a process during the load hung the console)
 static bool handleAction(daemon::SystemAction& action);
 static void openMenuFromHome(const char* source);
 // Locking with a HOME waiting behind a game: HOME is brought forward first and the console sleeps from there.
@@ -2345,14 +2344,6 @@ static void watchMenuStart() {
 }
 
 static void mainLoop() {
-    if (g_standbyLateAt) {
-        if (!daemon::app::isRunning() || menuOnScreen() || g_standbyActive || daemon::menu_la::isActive()) g_standbyLateAt = 0; // (HOME is up already, or the game is gone)
-        else if (nowNs() >= g_standbyLateAt) {
-            g_standbyLateAt = 0;
-            switchu::FileLog::logCommit("[standby] the forwarder has loaded; starting the waiting HOME");
-            startStandby();
-        }
-    }
     if (g_sleepNowPending) {
         g_sleepNowPending = false;
         switchu::FileLog::logCommit("[standby] HOME is in front; sleeping from HOME");
@@ -2468,7 +2459,7 @@ static void mainLoop() {
         g_standbyWakeAt = 0;
         if (g_launchForegroundPending) {
             g_launchForegroundPending = false;
-            g_standbyLateAt = nowNs() + 12'000'000'000ULL; // (a title HOME didn't stay open for: forwarders; its standby starts once the load is over)
+            startStandby(); // (a title HOME didn't stay open for: forwarders)
             Result fgRc = daemon::app::resume();
             // AM can still be taking the screen back from the menu that just
             // closed; a refusal then used to open HOME instead of the game.
