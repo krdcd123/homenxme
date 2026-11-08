@@ -144,6 +144,7 @@ private:
     void drawMenu(nxui::Renderer& r);
     void drawStats(nxui::Renderer& r);
     void drawMessage(nxui::Renderer& r);
+    void drawPadNotice(nxui::Renderer& r);
 
     // ---- the album
     struct Tile {
@@ -315,6 +316,8 @@ private:
     std::string m_message;
     float m_messageFor = 0.f;
     float m_messageLen = 4.5f;
+    bool m_padNotice = false; // Joy-Con taken off with flight mode on
+    float m_padNoticeIn = 0.f;
     bool m_statsAsked = false, m_statsEvery = false;
     struct PlayStat {
         std::uint64_t id = 0, last = 0, seconds = 0;

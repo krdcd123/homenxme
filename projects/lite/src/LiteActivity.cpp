@@ -1094,7 +1094,7 @@ void LiteActivity::onUpdate(float dt) {
         m_beat = std::floor(m_time * hz) / hz;
         if (app().input().hasUserActivity()) m_busyUntil = m_time + 0.7f;
         m_moving = m_intro < 1.f || m_gridT < 1.f || m_slideT < 1.f || m_menuIn < 1.f || m_statsIn < 1.f || m_galIn < 1.f || m_pressT < 1.f || m_pageIn < 1.f
-                   || std::abs(m_scroll - scrollTarget()) > 0.001f || m_leaving || m_returnTex || m_messageFor > 0.f
+                   || std::abs(m_scroll - scrollTarget()) > 0.001f || m_leaving || m_returnTex || m_messageFor > 0.f || m_padNotice || m_padNoticeIn > 0.f
                    || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
     }
 
@@ -1310,6 +1310,7 @@ void LiteActivity::onUpdate(float dt) {
     const bool leftDown = in.isDown(B::DLeft) || in.isDown(B::LStickL) || in.isDown(B::RStickL);
     const bool rightDown = in.isDown(B::DRight) || in.isDown(B::LStickR) || in.isDown(B::RStickR);
 
+    if (m_padNotice) return; // the Joy-Con notice holds the screen until they are back on
     if (handleTouch()) return;
     if (m_galOpen) {
         updateGallery();
@@ -1496,9 +1497,10 @@ void LiteActivity::readPads() {
     for (const PadInfo& p : m_pads) wasHandheld |= p.kind == kHandheld;
     for (const PadInfo& p : now) isHandheld |= p.kind == kHandheld;
     const bool detached = wasHandheld && !isHandheld;
+    const bool anyPad = !now.empty();
     m_pads = std::move(now);
-    if (detached && m_quick.airplane)
-        say("Joy-Con can't connect while flight mode is on. Turn flight mode off.", 8.f);
+    if (detached && m_quick.airplane) m_padNotice = true; // stays until they are back on the console
+    else if (m_padNotice && (isHandheld || (!m_quick.airplane && anyPad))) m_padNotice = false;
 }
 
 } // namespace lite

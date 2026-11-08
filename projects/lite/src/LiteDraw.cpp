@@ -128,6 +128,7 @@ void LiteActivity::draw(nxui::Renderer& r) {
     drawChrome(r, easeOut(m_intro * 2.f) * ui);
     drawMessage(r);
     drawMenu(r);
+    drawPadNotice(r);
     drawStats(r);
     drawGallery(r);
     nxui::setPhase("lite: opening and closing a game");
@@ -583,6 +584,26 @@ void LiteActivity::drawMessage(nxui::Renderer& r) {
     frostFast(r, pill, 21.f, nxui::Color(0.06f, 0.07f, 0.10f, 0.75f * a));
     r.drawRoundedRectOutline(pill, nxui::Color(1.f, 1.f, 1.f, 0.15f * a), 21.f, 1.5f);
     textMid(r, m_fBody, text, pill.x + 22.f, pill.y + 21.f, kWhite.withAlpha(a));
+}
+
+void LiteActivity::drawPadNotice(nxui::Renderer& r) {
+    if (m_padNotice) m_padNoticeIn = std::min(1.f, m_padNoticeIn + 0.08f);
+    else m_padNoticeIn = std::max(0.f, m_padNoticeIn - 0.12f);
+    if (m_padNoticeIn <= 0.f) return;
+    const float a = easeOut(m_padNoticeIn);
+    r.drawRect(nxui::Rect{0.f, 0.f, 1280.f, 720.f}, nxui::Color(0.f, 0.f, 0.f, 0.55f * a));
+    const nxui::Rect box{340.f, 230.f + 12.f * (1.f - a), 600.f, 250.f};
+    frostFast(r, box, 22.f, nxui::Color(0.08f, 0.09f, 0.13f, 0.92f * a));
+    r.drawRoundedRectOutline(box, nxui::Color(1.f, 1.f, 1.f, 0.18f * a), 22.f, 1.5f);
+    const std::string head = "Controllers disconnected";
+    textMid(r, m_fLabel, head, box.x + (box.width - measured(m_fLabel, head).x) * 0.5f, box.y + 52.f, kWhite.withAlpha(a));
+    const char* lines[] = {"Joy-Con can't connect wirelessly while", "flight mode is on. Turn flight mode off,", "or attach them to the sides of the console."};
+    float y = box.y + 112.f;
+    for (const char* line : lines) {
+        const std::string t = line;
+        textMid(r, m_fBody, t, box.x + (box.width - measured(m_fBody, t).x) * 0.5f, y, kMuted.withAlpha(a));
+        y += 34.f;
+    }
 }
 
 void LiteActivity::openMenu(std::string title, std::vector<Item> items) {
