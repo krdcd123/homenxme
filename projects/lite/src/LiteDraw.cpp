@@ -287,6 +287,14 @@ void LiteActivity::drawBackground(nxui::Renderer& r) {
     if (!drawAnimBackground(r, screen)) {
         r.drawGradientRect(screen, nxui::Color(0.36f, 0.41f, 0.55f, 1.f), nxui::Color(0.22f, 0.25f, 0.34f, 1.f));
     }
+    if (m_gridBlur > 0.001f) { // All Software: the picture goes frosted behind the tiles
+        const float k = easeOut(m_gridBlur);
+        if (m_animCur < m_animBlur.size() && m_animBlur[m_animCur] && m_animBlur[m_animCur]->valid()) {
+            const nxui::Texture* t = m_animBlur[m_animCur].get();
+            r.drawTextureSubRounded(t, {0.f, 0.f, static_cast<float>(t->width()), static_cast<float>(t->height())}, screen, 0.f, kWhite.withAlpha(k));
+        }
+        r.drawRoundedRect(screen, nxui::Color(0.05f, 0.06f, 0.10f, (m_animBlur.empty() ? 0.55f : 0.28f) * k), 0.f);
+    }
     r.drawGradientRect({0.f, 0.f, 1280.f, 140.f}, nxui::Color(0.05f, 0.06f, 0.10f, 0.35f), nxui::Color(0.05f, 0.06f, 0.10f, 0.f));
     r.drawGradientRect({0.f, 560.f, 1280.f, 160.f}, nxui::Color(0.05f, 0.06f, 0.10f, 0.f), nxui::Color(0.05f, 0.06f, 0.10f, 0.40f));
 }
@@ -356,7 +364,7 @@ void LiteActivity::drawCard(nxui::Renderer& r, const nxui::Rect& card, const Gam
         for (int i = 3; i >= 1; --i) { // the glow: wider, fainter lines outside the frame
             const float o = 5.f + 4.f * static_cast<float>(i);
             r.drawRoundedRectOutline({card.x - o, card.y - o, card.width + 2.f * o, card.height + 2.f * o},
-                                     blue.withAlpha(0.07f * (4 - i) * ring * t * alpha), rad + o, 5.f);
+                                     blue.withAlpha(0.13f * (4 - i) * ring * t * alpha), rad + o, 6.f);
         }
         r.drawRoundedRectOutline({card.x - 5.f, card.y - 5.f, card.width + 10.f, card.height + 10.f}, blue.withAlpha(ring * t * alpha), rad + 5.f, 4.5f);
         r.drawRoundedRectOutline(card, kWhite.withAlpha(0.85f * t * alpha), rad, 2.f);
@@ -460,9 +468,16 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
     if (m_avatar && m_avatar->valid()) r.drawTextureRounded(m_avatar.get(), fr, face * 0.5f, kWhite.withAlpha(a));
     else r.drawCircle({fr.x + face * 0.5f, fr.y + face * 0.5f}, face * 0.5f, nxui::Color(1.f, 1.f, 1.f, 0.3f * a), 32);
     r.drawRoundedRectOutline(fr, kWhite.withAlpha(0.8f * a), face * 0.5f, 2.f);
-    if (m_zone == Zone::Top)
-        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, accent((0.8f + 0.2f * std::sin(m_beat * 5.f)) * a),
-                                 face * 0.5f + 5.f, 3.f);
+    if (m_zone == Zone::Top && !m_grid) { // the same pale blue frame and glow as a chosen game
+        const float pulse = 0.9f + 0.1f * std::sin(m_beat * 4.f);
+        const nxui::Color blue(0.43f, 0.67f, 0.93f, 1.f);
+        for (int i = 3; i >= 1; --i) {
+            const float o = 5.f + 4.f * static_cast<float>(i);
+            r.drawRoundedRectOutline({fr.x - o, fr.y - o, face + 2.f * o, face + 2.f * o}, blue.withAlpha(0.13f * (4 - i) * pulse * a),
+                                     face * 0.5f + o, 5.f);
+        }
+        r.drawRoundedRectOutline({fr.x - 5.f, fr.y - 5.f, face + 10.f, face + 10.f}, blue.withAlpha(pulse * a), face * 0.5f + 5.f, 4.5f);
+    }
     const float hy = fr.y + face * 0.5f;
     drawStatus(r, a, hy, true);
 
@@ -490,11 +505,13 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
     // The dock
     const float rise = 40.f * (1.f - a);
     const nxui::Rect pill{kDock.x, kDock.y + rise, kDock.width, kDock.height};
+    if (!m_grid) {
     frostFast(r, pill, pill.height * 0.5f, nxui::Color(0.07f, 0.08f, 0.11f, 0.45f * a));
     r.drawRoundedRectOutline(pill, nxui::Color(1.f, 1.f, 1.f, 0.22f * a), pill.height * 0.5f, 1.5f);
     r.drawGradientRect({pill.x + 30.f, pill.y + 3.f, pill.width - 60.f, 24.f}, nxui::Color(1.f, 1.f, 1.f, 0.08f * a), nxui::Color(1.f, 1.f, 1.f, 0.f));
+    }
     const bool dock = m_zone == Zone::Bottom;
-    for (int i = 0; i < kDockCount; ++i) {
+    for (int i = 0; i < kDockCount && !m_grid; ++i) {
         const float cx = dockX(i), cy = dockY() + rise;
         const bool on = dock && m_dockSel == i;
         const float k = on ? 1.12f : 1.f;
@@ -517,13 +534,25 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
                 break;
             case 2: icon(r, "pad", cx, cy, 38.f * k, c); break;
             case 3: icon(r, "gear", cx, cy, 36.f * k, c); break;
+            case 4: { // USB file transfer: the trident of the USB symbol; a green dot while it is on
+                const float s = k;
+                r.drawRoundedRect({cx - 1.4f * s, cy - 17.f * s, 2.8f * s, 32.f * s}, c, 1.4f);
+                r.drawCircle({cx, cy + 17.f * s}, 5.f * s, c, 20);
+                r.drawRoundedRectOutline({cx - 12.f * s, cy - 3.f * s, 12.f * s, 3.f * s}, c, 1.5f, 2.f);
+                r.drawCircle({cx - 13.f * s, cy - 1.5f * s}, 3.4f * s, c, 14);
+                r.drawRoundedRect({cx, cy - 9.f * s, 12.f * s, 2.8f * s}, c, 1.4f);
+                r.drawRoundedRect({cx + 10.f * s, cy - 13.f * s, 7.f * s, 7.f * s}, c, 1.f);
+                r.drawCircle({cx, cy - 18.f * s}, 4.4f * s, c, 3); // the arrow head
+                if (m_mtp.on()) r.drawCircle({cx + 17.f, cy - 17.f}, 5.f, kGreen.withAlpha(a), 16);
+                break;
+            }
             default: icon(r, "power", cx, cy, 34.f * k, c); break;
         }
     }
     drawPads(r, a, rise);
     // What the chosen dock button opens, in a small frosted label above it
     if (dock && a >= 0.999f) {
-        static const char* const kLabel[] = {"Sphaira", "Album", "Controllers", "Settings", "Power"};
+        static const char* const kLabel[] = {"Sphaira", "Album", "Controllers", "Settings", "USB transfer", "Power"};
         const std::string label = kLabel[std::clamp(m_dockSel, 0, kDockCount - 1)];
         const float lw = measured(m_fBody, label).x;
         const nxui::Rect lb{dockX(m_dockSel) - (lw + 36.f) * 0.5f, pill.y - 50.f, lw + 36.f, 36.f};
@@ -533,7 +562,7 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
     }
     // The footer
     if (m_grid) drawHints(r, 1236.f, 696.f, {{"A", "OK"}, {"B", "Back"}, {"+", "Options"}}, a);
-    else drawHints(r, 1236.f, 696.f, {{"A", "OK"}, {"+", "Options"}, {"-", "Most played"}}, a);
+    else drawHints(r, 1236.f, 696.f, {{"A", "OK"}, {"+", "Options"}}, a);
 }
 
 // ---------------------------------------------------------------- opening and closing a game
@@ -1458,11 +1487,11 @@ bool LiteActivity::handleTouch() {
         return true;
     }
     if (m_locked || m_leaving) return true;
-    if (kAvatar.contains(x, y)) {
+    if (!m_grid && kAvatar.contains(x, y)) {
         openStats();
         return true;
     }
-    if (y > kDock.y - 6.f && y < kDock.y + kDock.height + 6.f)
+    if (!m_grid && y > kDock.y - 6.f && y < kDock.y + kDock.height + 6.f)
         for (int i = 0; i < kDockCount; ++i)
             if (std::abs(x - dockX(i)) < 44.f) {
                 m_zone = Zone::Bottom;

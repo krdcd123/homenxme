@@ -8,6 +8,7 @@
 // picture of the background, blurred once when the animation was made (config/CardsNX/animbg/blur_*.jpg).
 #include "Audio.hpp"
 #include "Library.hpp"
+#include "Mtp.hpp"
 #include "Settings.hpp"
 #include "launcher/AppletLauncher.hpp"
 
@@ -204,6 +205,8 @@ private:
     float m_time = 0.f;
     float m_beat = 0.f;      // m_time in the steps of the frames that are drawn (so the pulses step evenly)
     std::uint64_t m_running = 0; // the game or app that is open (suspended)
+    cards::Mtp m_mtp;        // the dock's USB file transfer (stops when HOME closes)
+    float m_gridBlur = 0.f;  // All Software: the background blurring behind the tiles
     float m_gridT = 1.f;     // All Software: the tiles coming together
     float m_slideT = 1.f;    // the row's cards settling after the order changed
     std::unordered_map<std::uint64_t, float> m_slideFrom;

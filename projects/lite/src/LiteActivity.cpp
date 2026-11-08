@@ -444,6 +444,7 @@ float LiteActivity::riseOrder(int i) const {
 
 void LiteActivity::openAllSoftware(bool on) {
     m_grid = on;
+    if (on) m_zone = Zone::Cards;
     m_sel = 0;
     m_list.clear();
     m_slideFrom.clear();
@@ -1027,11 +1028,20 @@ void LiteActivity::openSphaira() {
 void LiteActivity::activateDock(int index) {
     switch (index) {
         case 0: openSphaira(); break;
-        case 1: openGallery(); break;
+        case 1: openRealAlbum(); break; // straight to the stock Album
         case 2:
             leave(-1, 0.3f, [this]() { m_launcher.launchControllerPairing(); }); // the daemon opens it and starts HOME again
             break;
         case 3: openSettings(); break;
+        case 4:
+            if (m_mtp.on()) {
+                m_mtp.stop();
+                say("USB file transfer is off.");
+            } else {
+                m_mtp.start();
+                say("Plug the Switch into a computer: its SD card shows up there.");
+            }
+            break;
         default: openPower(); break;
     }
 }
@@ -1119,7 +1129,7 @@ void LiteActivity::onUpdate(float dt) {
         const float hz = 60.f / static_cast<float>(every > 1 ? every : 3);
         m_beat = std::floor(m_time * hz) / hz;
         if (app().input().hasUserActivity()) m_busyUntil = m_time + 0.7f;
-        m_moving = m_intro < 1.f || m_gridT < 1.f || m_slideT < 1.f || m_menuIn < 1.f || m_statsIn < 1.f || m_galIn < 1.f || m_pressT < 1.f || m_pageIn < 1.f
+        m_moving = m_intro < 1.f || m_gridT < 1.f || (m_gridBlur > 0.f && m_gridBlur < 1.f) || m_slideT < 1.f || m_menuIn < 1.f || m_statsIn < 1.f || m_galIn < 1.f || m_pressT < 1.f || m_pageIn < 1.f
                    || std::abs(m_scroll - scrollTarget()) > 0.001f || m_leaving || m_returnTex || m_messageFor > 0.f || m_padNotice || m_padNoticeIn > 0.f
                    || (m_locked && (m_lockIn < 1.f || m_unlockT >= 0.f || m_pw.wrong > 0.f));
     }
@@ -1207,6 +1217,11 @@ void LiteActivity::onUpdate(float dt) {
     auto step = [&](float& v, float seconds) { v = motion ? std::min(1.f, v + dt / seconds) : 1.f; };
     if (!m_returnTex || m_returnT > 0.f) step(m_intro, m_introFor);
     step(m_gridT, 0.7f);
+    {   // the blur behind All Software fades in and out
+        const float to = m_grid ? 1.f : 0.f;
+        const float d = dt / 0.35f;
+        m_gridBlur = !motion ? to : (m_gridBlur < to ? std::min(to, m_gridBlur + d) : std::max(to, m_gridBlur - d));
+    }
     step(m_slideT, 0.45f);
     step(m_menuIn, 0.2f);
     step(m_statsIn, 0.2f);
@@ -1385,11 +1400,11 @@ void LiteActivity::onUpdate(float dt) {
         gridHandled = true;
         if (upDown) {
             if (s >= kGridCols) select(s - kGridCols);
-            else { m_zone = Zone::Top; m_audio.play("navigation"); }
+            // (no way up to the profile in All Software)
         } else {
             if (s + kGridCols < n) select(s + kGridCols);
             else if (n > 0 && s / kGridCols < (n - 1) / kGridCols) select(n - 1);
-            else { m_zone = Zone::Bottom; m_audio.play("navigation"); }
+            // (no dock in All Software)
         }
     }
     if (upDown && !gridHandled && m_zone != Zone::Top) {
@@ -1415,7 +1430,6 @@ void LiteActivity::onUpdate(float dt) {
     else if (bDown && m_zone != Zone::Cards) m_zone = Zone::Cards;
     if (in.isDown(B::Plus)) openOptions();
     if (in.isDown(B::X)) askClose();
-    if (in.isDown(B::Minus)) openStats();
 }
 
 
@@ -1445,12 +1459,12 @@ void LiteActivity::buzz() {
             m_vib[m_vibCount++] = h[0];
     }
     HidVibrationValue v{};
-    v.amp_low = 0.22f;
+    v.amp_low = 0.09f;
     v.freq_low = 160.f;
-    v.amp_high = 0.22f;
+    v.amp_high = 0.09f;
     v.freq_high = 320.f;
     for (int i = 0; i < m_vibCount; ++i) hidSendVibrationValue(m_vib[i], &v);
-    m_buzzFor = m_vibCount ? 0.14f : 0.f;
+    m_buzzFor = m_vibCount ? 0.10f : 0.f;
 }
 
 // A thread that only watches: if the screen's thread stays in one step for seconds, the step is written to the log

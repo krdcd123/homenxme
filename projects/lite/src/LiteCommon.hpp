@@ -19,8 +19,8 @@ namespace lite::ui {
 
 // The layout: the stock Switch's, on 1280x720.
 inline constexpr float kSize = 224.f, kGrow = 44.f, kPitch = 254.f, kFirstX = 108.f, kMidY = 322.f;
-inline constexpr int kDockCount = 5; // Sphaira, Album, Controllers, Settings, Power
-inline const nxui::Rect kDock{390.f, 586.f, 500.f, 84.f};
+inline constexpr int kDockCount = 6; // Sphaira, Album, Controllers, Settings, USB transfer, Power
+inline const nxui::Rect kDock{340.f, 586.f, 600.f, 84.f};
 inline float dockX(int i) { return kDock.x + 54.f + 98.f * static_cast<float>(i); }
 inline float dockY() { return kDock.y + kDock.height * 0.5f; }
 inline const nxui::Rect kAvatar{48.f, 28.f, 52.f, 52.f};
