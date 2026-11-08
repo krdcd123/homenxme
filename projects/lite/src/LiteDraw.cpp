@@ -487,13 +487,13 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
         float t = 0.f;
         if (cardRect(m_sel, card, t) && a >= 0.999f) {
             const std::string name = fit(m_fTitle, g->name, 640.f, 0.62f);
-            textMid(r, m_fTitle, name, m_grid ? kGridX : card.x, m_grid ? 112.f : card.y - 34.f, kBlue.withAlpha(a), 0.62f);
+            textMid(r, m_fTitle, name, m_grid ? kGridX : card.x, m_grid ? 98.f : card.y - 34.f, kBlue.withAlpha(a), 0.62f);
             if (m_zone == Zone::Cards) {
                 std::string line;
                 if (g->action == "allsoftware") line = std::to_string(m_games.size() + m_homebrew.size()) + " titles";
                 else line = g->playSeconds ? playTime(g->playSeconds) + " played" : std::string("Not played yet");
                 const float lw = measured(m_fBody, line).x;
-                const nxui::Rect box = m_grid ? nxui::Rect{kGridX + measured(m_fTitle, name).x * 0.62f + 22.f, 92.f, lw + 44.f, 40.f}
+                const nxui::Rect box = m_grid ? nxui::Rect{kGridX + measured(m_fTitle, name).x * 0.62f + 22.f, 78.f, lw + 44.f, 40.f}
                                               : nxui::Rect{card.x + (card.width - (lw + 44.f)) * 0.5f, card.y + card.height + 18.f, lw + 44.f, 40.f};
                 frostFast(r, box, 20.f, nxui::Color(0.07f, 0.08f, 0.11f, 0.45f * a));
                 r.drawRoundedRectOutline(box, nxui::Color(1.f, 1.f, 1.f, 0.22f * a), 20.f, 1.5f);
@@ -535,7 +535,7 @@ void LiteActivity::drawChrome(nxui::Renderer& r, float a) {
             case 2: icon(r, "pad", cx, cy, 38.f * k, c); break;
             case 3: icon(r, "gear", cx, cy, 36.f * k, c); break;
             case 4: { // USB file transfer: the trident of the USB symbol; a green dot while it is on
-                const float s = k;
+                const float s = k * 0.74f;
                 r.drawRoundedRect({cx - 1.4f * s, cy - 17.f * s, 2.8f * s, 32.f * s}, c, 1.4f);
                 r.drawCircle({cx, cy + 17.f * s}, 5.f * s, c, 20);
                 r.drawRoundedRectOutline({cx - 12.f * s, cy - 3.f * s, 12.f * s, 3.f * s}, c, 1.5f, 2.f);
