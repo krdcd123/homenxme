@@ -69,7 +69,14 @@ bool LiteActivity::onCreate() {
     nifmInitialize(NifmServiceType_User);
     m_launcher.init({
         [this]() { m_audio.play("hide_modal"); },
-        [this]() { app().requestExit(); },
+        [this]() {
+            if (m_residentNext) { // HOME stays open behind the game: no new process has to be made when Home is pressed
+                m_residentNext = false;
+                enterStandby();
+            } else {
+                app().requestExit();
+            }
+        },
         [this]() { // before sleep / restart / power off: everything on the SD card
             m_settings.save();
             return R_SUCCEEDED(fsdevCommitDevice("sdmc"));
@@ -77,6 +84,10 @@ bool LiteActivity::onCreate() {
     });
     m_launcher.setStartupStatus(m_startSuspended, m_startRunning);
 
+    {
+        std::error_code residentEc; // standby_home: stay open behind games instead of closing
+        m_resident = std::filesystem::exists("sdmc:/config/SwitchU/standby_home", residentEc);
+    }
     m_settings.load();
     m_clock24 = m_settings.clock24;
 
@@ -783,6 +794,8 @@ void LiteActivity::pumpDaemon() {
                 m_nextAsk = m_time;
                 m_intro = 0.f;
                 m_chimeWanted = true;
+                comeBack(); // (it left to start the game: the cards rise back in)
+                m_intro = 0.f;
                 break;
             case M::SleepSequence: // stop drawing (a loop that keeps drawing never lets it sleep)
                 if (m_standby) break; // (hidden: the game has the screen)
@@ -829,6 +842,14 @@ void LiteActivity::pumpDaemon() {
 }
 
 // ---------------------------------------------------------------- starting things
+
+// HOME stays open but hidden and quiet behind the game, until the daemon says Home was pressed.
+void LiteActivity::enterStandby() {
+    switchu::FileLog::logCommit("[lite] standby: staying open behind the game");
+    m_standby = true;
+    switchu::menu::smi_cmd::menuStandby();
+    app().setSleeping(true);
+}
 
 void LiteActivity::say(const std::string& message, float seconds) {
     m_message = message;
@@ -909,13 +930,17 @@ void LiteActivity::launchGame(const Game& g) {
             say("The game didn't start. Try again.");
             return;
         }
+        m_residentNext = m_resident;
         m_launcher.closeForLaunch();
     });
 }
 
 // Back to the game or app HOME left open.
 void LiteActivity::resumeOpen(int index) {
-    leave(index, 0.38f, [this]() { m_launcher.resumeApplication(); });
+    leave(index, 0.38f, [this]() {
+        m_residentNext = m_resident;
+        m_launcher.resumeApplication();
+    });
 }
 
 // Another game or app is open: it closes first (starting one ends the other), then `next` starts.

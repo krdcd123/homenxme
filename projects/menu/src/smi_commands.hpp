@@ -184,6 +184,7 @@ inline Result reboot()      { return sendSimple(smi::SystemMessage::Reboot); }
 inline Result rebootToPayload() { return sendSimple(smi::SystemMessage::RebootToPayload); }
 inline Result menuReady()      { return sendSimple(smi::SystemMessage::MenuReady); }
 inline Result menuClosing()    { return sendSimple(smi::SystemMessage::MenuClosing); }
+inline Result menuStandby()    { return sendSimple(smi::SystemMessage::MenuStandby); }
 
 struct AppEntry {
     uint64_t titleId;

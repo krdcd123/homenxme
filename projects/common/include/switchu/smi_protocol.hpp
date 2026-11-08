@@ -56,6 +56,7 @@ enum class SystemMessage : uint32_t {
 
     MenuReady             = 40,
     MenuClosing           = 41,
+    MenuStandby           = 42, // HomeNX: HOME stays open, hidden behind the game it just started or resumed
 };
 
 enum class MenuStartMode : uint32_t {

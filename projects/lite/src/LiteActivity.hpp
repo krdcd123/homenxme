@@ -145,6 +145,7 @@ private:
     void drawStats(nxui::Renderer& r);
     void drawMessage(nxui::Renderer& r);
     void drawPadNotice(nxui::Renderer& r);
+    void enterStandby();
 
     // ---- the album
     struct Tile {
@@ -275,6 +276,8 @@ private:
     std::atomic<bool> m_animDone{false};
     std::future<void> m_animReadJob;
     bool m_appletReturn = false;                         // back from the Album or the controller screen: not from a game
+    bool m_resident = false;     // stays open behind a game it starts (standby_home)
+    bool m_residentNext = false;
     bool m_standby = false;      // waiting hidden behind a game until the daemon says Home was pressed
     bool m_hiddenStart = false;  // started hidden: asks for the screen itself
     bool m_gotFocus = false;
