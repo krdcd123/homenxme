@@ -830,9 +830,10 @@ void LiteActivity::pumpDaemon() {
 
 // ---------------------------------------------------------------- starting things
 
-void LiteActivity::say(const std::string& message) {
+void LiteActivity::say(const std::string& message, float seconds) {
     m_message = message;
-    m_messageFor = 4.5f;
+    m_messageLen = seconds;
+    m_messageFor = seconds;
 }
 
 void LiteActivity::leave(int index, float seconds, std::function<void()> then) {
@@ -1490,7 +1491,14 @@ void LiteActivity::readPads() {
         now.push_back(p);
     }
     if (now.size() > 4) now.resize(4);
+    // Joy-Con taken off the console with flight mode on: they can't connect, so say so (as the console does).
+    bool wasHandheld = false, isHandheld = false;
+    for (const PadInfo& p : m_pads) wasHandheld |= p.kind == kHandheld;
+    for (const PadInfo& p : now) isHandheld |= p.kind == kHandheld;
+    const bool detached = wasHandheld && !isHandheld;
     m_pads = std::move(now);
+    if (detached && m_quick.airplane)
+        say("Joy-Con can't connect while flight mode is on. Turn flight mode off.", 8.f);
 }
 
 } // namespace lite

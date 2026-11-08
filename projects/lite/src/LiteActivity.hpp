@@ -120,7 +120,7 @@ private:
     void resumeOpen(int index);
     bool closeEverything();
     void pumpDaemon();
-    void say(const std::string& message);
+    void say(const std::string& message, float seconds = 4.5f);
     std::uint64_t runningId() const;
     std::uint64_t hostTitleId() const;
     AccountUid launchUid() const;
@@ -314,6 +314,7 @@ private:
     float m_statsIn = 1.f;
     std::string m_message;
     float m_messageFor = 0.f;
+    float m_messageLen = 4.5f;
     bool m_statsAsked = false, m_statsEvery = false;
     struct PlayStat {
         std::uint64_t id = 0, last = 0, seconds = 0;

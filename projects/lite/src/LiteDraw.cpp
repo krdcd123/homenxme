@@ -576,7 +576,7 @@ void LiteActivity::drawReturn(nxui::Renderer& r) {
 
 void LiteActivity::drawMessage(nxui::Renderer& r) {
     if (m_messageFor <= 0.f || m_message.empty()) return;
-    const float a = std::min(1.f, m_messageFor * 3.f) * easeOut((4.5f - m_messageFor) * 5.f);
+    const float a = std::min(1.f, m_messageFor * 3.f) * easeOut((m_messageLen - m_messageFor) * 5.f);
     const std::string text = fit(m_fBody, m_message, 900.f);
     const float w = measured(m_fBody, text).x + 44.f;
     const nxui::Rect pill{640.f - w * 0.5f, 520.f + 10.f * (1.f - a), w, 42.f};

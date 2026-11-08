@@ -276,6 +276,10 @@ static int g_standbyReadyBase = 0;
 static bool menuOnScreen() { return daemon::menu_la::isActive() && !g_standbyActive; }
 static bool wakeStandby(const char* why);
 static void startStandby();
+static void openMenuFromHome(const char* source);
+// Locking with a HOME waiting behind a game: HOME is brought forward first and the console sleeps from there.
+static bool g_sleepAfterHome = false;
+static bool g_sleepNowPending = false;
 
 static bool shouldDeferViewPolling() {
     // HomeNX: nothing slow on this thread while HOME is being opened.
@@ -1012,6 +1016,19 @@ static void startSleepSequence(const char* source) {
     // sleep is started the way the stock HOME starts it, with none of the extra steps. The freezes only ever came
     // after sleeps that had all of them.
     if (!menuOnScreen()) {
+        std::error_code planEc;
+        if (g_standbyActive && !g_sleepAfterHome && !std::filesystem::exists("sdmc:/config/SwitchU/standby_plain_sleep", planEc)) {
+            // HOME comes to the front, then the console sleeps from HOME (the way that has always woken).
+            const bool keptScreen = g_gameKeptScreenAtSleep;
+            g_sleepAfterHome = true;
+            g_gameKeptScreenAtSleep = false;
+            switchu::FileLog::logCommit("[standby] lock in a game: bringing HOME forward first");
+            openMenuFromHome("sleep");
+            if (g_pendingHomeMenuLaunch) return; // (sleeps once HOME says it has the screen)
+            g_sleepAfterHome = false; // (HOME would not come: plain sleep below)
+            g_gameKeptScreenAtSleep = keptScreen;
+        }
+        g_sleepAfterHome = false;
         std::error_code closeEc; // (keeping it alive through sleep left the console unable to wake: an empty standby_keep_on_sleep file allows it)
         if (g_standbyActive && !std::filesystem::exists("sdmc:/config/SwitchU/standby_keep_on_sleep", closeEc)) { // the console did not wake with a HOME waiting behind the game, so it goes first
             g_standbyActive = false;
@@ -1982,6 +1999,10 @@ static bool handleMenuCommand() {
         g_menuReadySeen = true;
         g_menuStartRetries = 0;
         ++g_menuReadyCount;
+        if (g_sleepAfterHome) { // HOME has the screen: the sleep that was waiting for it
+            g_sleepAfterHome = false;
+            g_sleepNowPending = true;
+        }
         g_lastOperationFailure = {};
         g_batteryRefreshPending.store(true);
         // The menu is up: the catch-up view polls behind a game's record event
@@ -2285,6 +2306,11 @@ static void watchMenuStart() {
 }
 
 static void mainLoop() {
+    if (g_sleepNowPending) {
+        g_sleepNowPending = false;
+        switchu::FileLog::logCommit("[standby] HOME is in front; sleeping from HOME");
+        startSleepSequence("home-for-sleep");
+    }
     if (g_standbyWakeAt) { // HOME was told to come forward: if it never says it has the screen, start a fresh one
         if (g_menuReadyCount > g_standbyReadyBase) {
             g_standbyWakeAt = 0;
