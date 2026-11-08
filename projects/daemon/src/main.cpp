@@ -1012,8 +1012,8 @@ static void startSleepSequence(const char* source) {
     // sleep is started the way the stock HOME starts it, with none of the extra steps. The freezes only ever came
     // after sleeps that had all of them.
     if (!menuOnScreen()) {
-        std::error_code closeEc; // (an empty standby_close_on_sleep file brings back closing it first)
-        if (g_standbyActive && std::filesystem::exists("sdmc:/config/SwitchU/standby_close_on_sleep", closeEc)) { // the console did not wake with a HOME waiting behind the game, so it goes first
+        std::error_code closeEc; // (keeping it alive through sleep left the console unable to wake: an empty standby_keep_on_sleep file allows it)
+        if (g_standbyActive && !std::filesystem::exists("sdmc:/config/SwitchU/standby_keep_on_sleep", closeEc)) { // the console did not wake with a HOME waiting behind the game, so it goes first
             g_standbyActive = false;
             g_standbyWakeAt = 0;
             switchu::FileLog::logCommit("[standby] closing the waiting HOME before sleep");
