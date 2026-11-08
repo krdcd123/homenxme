@@ -254,6 +254,7 @@ static bool g_pendingHomeMenuLaunch = false;
 // HomeNX: a game started in the background while the menu closes; it gets the
 // screen as soon as the menu has exited.
 static bool g_launchForegroundPending = false;
+static std::uint64_t g_launchTitleId = 0; // what that early launch is (a forwarder gets the screen later)
 static const char* g_pendingHomeMenuSource = nullptr;
 static uint64_t g_pendingHomeMenuStartedAt = 0;
 // HomeNX: when the menu asked for something that only happens once it has
@@ -1782,6 +1783,7 @@ static bool handleMenuCommand() {
             result = daemon::app::launch(args.title_id, uid, false);
             if (R_SUCCEEDED(result)) {
                 g_launchForegroundPending = true;
+                g_launchTitleId = args.title_id;
                 recordOperationResult(requestId, msg, result, args.title_id);
                 switchu::FileLog::log("[smi] launch 0x%016lX started early; foreground when the menu exits",
                                       args.title_id);
@@ -2028,6 +2030,10 @@ static bool handleMenuCommand() {
         Result fgRc = 0;
         if (g_launchForegroundPending) {
             g_launchForegroundPending = false;
+            if ((g_launchTitleId >> 56) == 0x05) { // a forwarder: HOME stays open, so nothing is created; the game gets time to load before it takes the screen
+                switchu::FileLog::logCommit("[standby] forwarder loading: the screen stays with HOME for 3 s");
+                svcSleepThread(3'000'000'000ULL);
+            }
             fgRc = daemon::app::resume();
             for (int i = 0; R_FAILED(fgRc) && i < 6 && daemon::app::isRunning(); ++i) {
                 svcSleepThread(40'000'000ULL);

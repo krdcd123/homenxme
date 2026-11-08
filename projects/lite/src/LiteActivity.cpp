@@ -931,8 +931,7 @@ void LiteActivity::launchGame(const Game& g) {
             say("The game didn't start. Try again.");
             return;
         }
-        // Installed games stay behind; forwarders (title ids 0x05...) hung the console while loading with HOME open.
-        m_residentNext = m_resident && (id >> 56) == 0x01;
+        m_residentNext = m_resident; // (forwarders too: the daemon holds the screen back while they load)
         m_launcher.closeForLaunch();
     });
 }
@@ -940,7 +939,7 @@ void LiteActivity::launchGame(const Game& g) {
 // Back to the game or app HOME left open.
 void LiteActivity::resumeOpen(int index) {
     leave(index, 0.38f, [this]() {
-        m_residentNext = m_resident && (runningId() >> 56) == 0x01;
+        m_residentNext = m_resident;
         m_launcher.resumeApplication();
     });
 }
